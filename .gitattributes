@@ -1,0 +1,2 @@
+# Keep Node executable shebangs usable in archives packed on Windows.
+packaging/npm/** text eol=lf
