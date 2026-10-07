@@ -6,7 +6,7 @@ const { createHash } = require('node:crypto');
 const { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists, safeDirectory } = require('./common');
 const { download } = require('./download');
 const { extractArchive } = require('./archive');
-const { stateDirectory, cacheDirectory } = require('./state');
+const { cacheDirectory } = require('./cache');
 const packageVersion = require('../../../package.json').version;
 
 function releaseSpec(manifest, platform = process.platform, arch = process.arch, runtime = {}) {
@@ -142,9 +142,9 @@ async function main(argv = process.argv.slice(2), options = {}) {
   const platform = options.platform || process.platform;
   const environment = options.environment || process.env;
   const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
-  const state = await stateDirectory(environment, platform);
   const installed = await ensureBinary(spec, { ...options, cache: options.cache || cacheDirectory(environment, platform) });
-  return launchNative(installed.executable, argv, { ...environment, HELM_HOME: path.resolve(installed.home),
-    HELM_STATE_DIR: state }, options);
+  // The bundled runtime owns state discovery and migration for every entrypoint.
+  return launchNative(installed.executable, argv, { ...environment,
+    STACKBITE_HOME: path.resolve(installed.home) }, options);
 }
 module.exports = { releaseSpec, validatePayload, ensureBinary, launchNative, main };
