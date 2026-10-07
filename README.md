@@ -7,7 +7,19 @@ and Linux x64 with glibc; macOS, ARM and musl/Alpine builds are not supplied yet
 Python installation and compilation are unnecessary. Archive extraction requires
 `tar` (included in current Windows and common Linux distributions).
 
-## Available without an npm account
+## Install without an account
+
+The public npm package is available as `stackbite`:
+
+```sh
+npx --yes stackbite
+npm install --global stackbite
+stackbite
+```
+
+Update a registry installation with `npm install --global stackbite@latest`.
+
+## Direct GitHub package
 
 Run the package attached to the verified GitHub release:
 
@@ -33,19 +45,6 @@ checksums and product identity, then reuses a persistent binary cache. There is 
 postinstall download or provider installation. An offline cached launch is possible;
 the first launch needs access to GitHub release downloads.
 
-## Short npm registry commands
-
-Once the package owner publishes `stackbite` to the public npm registry:
-
-```sh
-npx --yes stackbite
-npm install --global stackbite
-stackbite
-```
-
-These short commands require registry publication. Until that happens, use the
-verified GitHub package URL above rather than a similarly named external package.
-Update a registry installation with `npm install --global stackbite@latest`.
 For a GitHub URL installation, install the package URL from the newer release.
 Each npm package pins one native release; the portable app's own `stackbite update`
 does not change the npm package version.
