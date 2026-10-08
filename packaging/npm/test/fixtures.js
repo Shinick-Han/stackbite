@@ -1,7 +1,8 @@
 'use strict';
 const { createHash } = require('node:crypto');
 const { gzipSync, deflateRawSync } = require('node:zlib');
-const COMMIT = '5af83c540e88354a05caa789bb64a663580d5a50';
+const COMMIT = 'a'.repeat(40);
+const VERSION = require('../../../package.json').version;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 function tar(records) {
   const blocks = [];
@@ -56,9 +57,9 @@ function zip(records) {
 }
 function fixture(platform = 'linux', changes = {}) {
   const host = platform === 'win32' ? 'windows-x64' : 'linux-x86_64';
-  const root = `stackbite-0.5.10-${host}-${COMMIT.slice(0, 12)}`;
+  const root = `stackbite-${VERSION}-${host}-${COMMIT.slice(0, 12)}`;
   const asset = root + (platform === 'win32' ? '.zip' : '.tar.gz');
-  const metadata = Buffer.from(JSON.stringify({ version: '0.5.10', commit: COMMIT, product: 'Stackbite', command: 'stackbite', platform: host, ...changes }));
+  const metadata = Buffer.from(JSON.stringify({ version: VERSION, commit: COMMIT, product: 'Stackbite', command: 'stackbite', platform: host, ...changes }));
   const image = platform === 'win32' ? 'stackbite.exe' : 'stackbite';
   const files = { 'portable.json': metadata, 'runtime/build-info.json': metadata,
     [image]: platform === 'win32' ? Buffer.from('MZfixture image') : Buffer.from('\x7fELFfixture image'),
@@ -69,9 +70,9 @@ function fixture(platform = 'linux', changes = {}) {
   if (platform === 'linux') files.SHA256SUMS = Buffer.from(Object.entries(hashes).map(([name, value]) => `${value}  ${name}\n`).join(''));
   const records = Object.entries(files).map(([name, data]) => ({ name: root + '/' + name, data, mode: name === image ? 0o100755 : 0o100644 }));
   const bytes = platform === 'win32' ? zip(records) : gzipSync(tar(records));
-  const pinned = { asset, url: `https://github.com/Shinick-Han/stackbite/releases/download/v0.5.10/${asset}`, root,
+  const pinned = { asset, url: `https://github.com/Shinick-Han/stackbite/releases/download/v${VERSION}/${asset}`, root,
     sha256: digest(bytes), size: bytes.length, manifestSha256: digest(manifestBytes), metadataSha256: digest(metadata) };
-  const manifest = { schema: 1, version: '0.5.10', commit: COMMIT, repository: 'Shinick-Han/stackbite', platforms: { [`${platform}-x64`]: pinned } };
+  const manifest = { schema: 1, version: VERSION, commit: COMMIT, repository: 'Shinick-Han/stackbite', platforms: { [`${platform}-x64`]: pinned } };
   return { bytes, pinned, manifest, root, files, image };
 }
 module.exports = { COMMIT, digest, tar, zip, fixture };
