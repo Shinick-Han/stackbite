@@ -1,12 +1,25 @@
 {
   "name": "stackbite",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "description": "Verified native Stackbite CLI bootstrapper",
   "license": "UNLICENSED",
-  "engines": { "node": ">=20" },
-  "bin": { "stackbite": "packaging/npm/bin/stackbite.js" },
-  "files": ["packaging/npm/bin/", "packaging/npm/lib/", "packaging/npm/release.json"],
-  "scripts": { "test": "node --test packaging/npm/test/*.test.js" },
-  "repository": { "type": "git", "url": "https://github.com/Shinick-Han/stackbite.git" },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "stackbite": "packaging/npm/bin/stackbite.js"
+  },
+  "files": [
+    "packaging/npm/bin/",
+    "packaging/npm/lib/",
+    "packaging/npm/release.json"
+  ],
+  "scripts": {
+    "test": "node --test packaging/npm/test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shinick-Han/stackbite.git"
+  },
   "homepage": "https://github.com/Shinick-Han/stackbite"
 }

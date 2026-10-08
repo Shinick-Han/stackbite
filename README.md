@@ -9,13 +9,22 @@ Python installation and compilation are unnecessary. Archive extraction requires
 
 ## Install without an account
 
-The public npm package is available as `stackbite`:
+Choose one method. For a single run, use the public npm package:
 
 ```sh
 npx --yes stackbite
+```
+
+For a persistent command, install it globally and then run it:
+
+```sh
 npm install --global stackbite
 stackbite
 ```
+
+Both methods download the verified native runtime on first execution. Global
+installation alone installs the small launcher; its first `stackbite` invocation
+downloads the runtime. Running both installation methods is unnecessary.
 
 Update a registry installation with `npm install --global stackbite@latest`.
 
@@ -24,14 +33,14 @@ Update a registry installation with `npm install --global stackbite@latest`.
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.11/stackbite-0.5.11.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.12/stackbite-0.5.12.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.11/stackbite-0.5.11.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.12/stackbite-0.5.12.tgz
 stackbite
 ```
 
@@ -72,7 +81,7 @@ Build and verify both native platform archives first. Prepare the pinned manifes
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.11
+python scripts/prepare_npm_release.py --version 0.5.12
 npm test
 npm pack
 ```
