@@ -58,14 +58,14 @@ Update a registry installation with `npm install --global stackbite@latest`.
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.17/stackbite-0.5.17.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.18/stackbite-0.5.18.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.17/stackbite-0.5.17.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.18/stackbite-0.5.18.tgz
 stackbite setup
 stackbite
 ```
@@ -119,7 +119,7 @@ Build and verify both native platform archives first. Prepare the pinned manifes
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.17
+python scripts/prepare_npm_release.py --version 0.5.18
 npm test
 npm pack
 ```
