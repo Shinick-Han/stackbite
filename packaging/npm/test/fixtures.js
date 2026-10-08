@@ -55,7 +55,7 @@ function zip(records) {
   end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
   return Buffer.concat([...local, directory, end]);
 }
-function fixture(platform = 'linux', changes = {}) {
+function fixture(platform = 'linux', changes = {}, extraFiles = {}) {
   const host = platform === 'win32' ? 'windows-x64' : 'linux-x86_64';
   const root = `stackbite-${VERSION}-${host}-${COMMIT.slice(0, 12)}`;
   const asset = root + (platform === 'win32' ? '.zip' : '.tar.gz');
@@ -63,7 +63,7 @@ function fixture(platform = 'linux', changes = {}) {
   const image = platform === 'win32' ? 'stackbite.exe' : 'stackbite';
   const files = { 'portable.json': metadata, 'runtime/build-info.json': metadata,
     [image]: platform === 'win32' ? Buffer.from('MZfixture image') : Buffer.from('\x7fELFfixture image'),
-    'runtime/owned.txt': Buffer.from('fixed runtime fixture') };
+    'runtime/owned.txt': Buffer.from('fixed runtime fixture'), ...extraFiles };
   const hashes = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, digest(bytes)]));
   const manifestBytes = Buffer.from(JSON.stringify(hashes));
   files['SHA256SUMS.json'] = manifestBytes;

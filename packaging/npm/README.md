@@ -15,16 +15,41 @@ Choose one method. For a single run, use the public npm package:
 npx --yes stackbite
 ```
 
-For a persistent command, install it globally and then run it:
+For a persistent command, install it globally, prepare the runtime, then launch:
 
 ```sh
 npm install --global stackbite
+stackbite setup
 stackbite
 ```
 
-Both methods download the verified native runtime on first execution. Global
-installation alone installs the small launcher; its first `stackbite` invocation
-downloads the runtime. Running both installation methods is unnecessary.
+Global installation installs the small launcher without a postinstall download.
+`stackbite setup` downloads and fully validates its pinned runtime without starting
+the app or backend. It prints short stages to stderr. If setup is omitted, the
+first launch prepares the runtime with the same stages. Cached launches remain
+quiet and fully validate the runtime every time. Running both installation methods
+is unnecessary.
+
+The same preparation command works through npx:
+
+```sh
+npx --yes stackbite setup
+```
+
+Check a prepared runtime offline with `stackbite setup --check`. The launcher
+checks all pinned file hashes, identity, inventory and link boundaries, without
+downloading, extracting, writing cache files, or starting the app/backend. It exits
+with status 0 when valid and status 1 when absent or invalid; an absent cache needs
+`stackbite setup`. Only `setup` and `setup --check` are accepted setup forms.
+The launcher check is read-only; npx itself may install its npm package before
+invoking it, so use the installed command for an entirely offline check.
+
+Binary caches use `%LOCALAPPDATA%\Stackbite\cache` on Windows and
+`${XDG_CACHE_HOME:-~/.cache}/stackbite` on Linux. `LOCALAPPDATA`, `XDG_CACHE_HOME`
+and `HOME` overrides retain their normal behavior. These caches are separate from
+application state. Interrupted preparation removes only its own temporary staging
+directory and can be retried. An invalid existing runtime is reported and left in
+place; setup does not delete or overwrite it.
 
 Update a registry installation with `npm install --global stackbite@latest`.
 
@@ -33,14 +58,15 @@ Update a registry installation with `npm install --global stackbite@latest`.
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.14/stackbite-0.5.14.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.15/stackbite-0.5.15.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.14/stackbite-0.5.14.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.15/stackbite-0.5.15.tgz
+stackbite setup
 stackbite
 ```
 
@@ -70,18 +96,30 @@ contracts are not renamed or migrated. Binary cache data is separate from this
 state. Installing or launching the npm package does not stop an existing backend.
 Check the connected server's capabilities before using newly added runtime features.
 
-The launcher inherits terminal input/output and passes CLI arguments directly to
-the native app. It does not insert a second screen renderer or an agent provider.
+For app commands, the launcher inherits terminal input/output and passes CLI
+arguments directly to the native app. Its `setup` command only prepares/checks the
+runtime. It does not insert a second screen renderer or an agent provider.
 Global npm installation creates only the `stackbite` command; it does not claim an
 external `helm` command or replace independent Kubernetes tooling.
 
 ## Maintainer release steps
 
+Measure bounded fake runtime preparation and warm verification without network or
+app processes:
+
+```sh
+node packaging/npm/test/measure-setup.js
+```
+
+The measurement reports fixture sizes and each preparation stage plus warm check
+and launch validation costs. It uses disposable cache data and an inert child
+stub; its timings are not measurements of released native bundles or providers.
+
 Build and verify both native platform archives first. Prepare the pinned manifest
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.14
+python scripts/prepare_npm_release.py --version 0.5.15
 npm test
 npm pack
 ```

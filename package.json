@@ -1,6 +1,6 @@
 {
   "name": "stackbite",
-  "version": "0.5.14",
+  "version": "0.5.15",
   "description": "Verified native Stackbite CLI bootstrapper",
   "license": "UNLICENSED",
   "engines": {

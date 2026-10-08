@@ -6,7 +6,8 @@ const { createHash } = require('node:crypto');
 const { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists, safeDirectory } = require('./common');
 const { download } = require('./download');
 const { extractArchive } = require('./archive');
-const { cacheDirectory } = require('./cache');
+const { cacheDirectory, existingCacheDirectory } = require('./cache');
+const { parseSetup, stageReporter } = require('./setup');
 const packageVersion = require('../../../package.json').version;
 
 function releaseSpec(manifest, platform = process.platform, arch = process.arch, runtime = {}) {
@@ -95,28 +96,46 @@ async function validatePayload(directory, spec) {
   if (spec.platform === 'linux' && process.platform !== 'win32' && !(image.mode & 0o111)) fail('Native release executable has no execute permission');
   return executable;
 }
-async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive } = {}) {
+async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
+  checkOnly = false, reportCached = false, progress = () => {} } = {}) {
   cache = path.resolve(cache);
-  await safeDirectory(cache);
+  if (checkOnly) {
+    if (!await existingCacheDirectory(cache)) fail('Pinned runtime is not cached; run stackbite setup.');
+  } else await safeDirectory(cache);
   const target = path.join(cache, `${spec.version}-${spec.commit}-${spec.key}-${spec.sha256}`);
-  if (await exists(target)) return { home: target, executable: await validatePayload(target, spec) };
+  if (await exists(target)) {
+    if (checkOnly || reportCached) progress('validate');
+    const installed = { home: target, executable: await validatePayload(target, spec) };
+    if (checkOnly || reportCached) progress('ready');
+    return installed;
+  }
+  if (checkOnly) fail('Pinned runtime is not cached; run stackbite setup.');
   const staging = await fs.mkdtemp(path.join(cache, '.staging-'));
   try {
     const archive = path.join(staging, spec.asset), extraction = path.join(staging, 'extract');
     await fs.mkdir(extraction, { mode: 0o700 });
+    progress('download');
     await downloadImpl(spec, archive);
     // Recheck at the extraction boundary, including for injected test transports.
+    progress('archive');
     if ((await fs.stat(archive)).size !== spec.size || await hashFile(archive, LIMITS.download) !== spec.sha256) fail('Pinned archive SHA-256 or size mismatch');
+    progress('extract');
     await extractImpl(archive, extraction, spec);
     const payload = path.join(extraction, spec.root);
+    progress('validate');
     await validatePayload(payload, spec);
+    progress('publish');
     try { await fs.rename(payload, target); }
     catch (error) {
       // Another process may have installed the same immutable payload first.
       // Never delete/rewrite its directory or try a destructive rename retry.
       if (!await exists(target)) throw error;
     }
-    return { home: target, executable: await validatePayload(target, spec) };
+    // Validate at the final path, including a concurrent publisher's payload.
+    progress('validate-published');
+    const installed = { home: target, executable: await validatePayload(target, spec) };
+    progress('ready');
+    return installed;
   } finally {
     // Only this mkdtemp handle is owned by this invocation.
     if (!inside(cache, staging) || path.dirname(staging) !== cache) fail('Unsafe staging cleanup path');
@@ -138,11 +157,15 @@ async function launchNative(executable, argv, environment, { spawnImpl = spawn, 
   });
 }
 async function main(argv = process.argv.slice(2), options = {}) {
+  const setup = parseSetup(argv);
   const manifest = options.manifest || require('../release.json');
   const platform = options.platform || process.platform;
   const environment = options.environment || process.env;
   const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
-  const installed = await ensureBinary(spec, { ...options, cache: options.cache || cacheDirectory(environment, platform) });
+  const installed = await ensureBinary(spec, { ...options, cache: options.cache || cacheDirectory(environment, platform),
+    checkOnly: setup?.checkOnly || false, reportCached: Boolean(setup),
+    progress: options.progress || stageReporter(options.stderr || process.stderr) });
+  if (setup) return { code: 0, signal: null };
   // The bundled runtime owns state discovery and migration for every entrypoint.
   return launchNative(installed.executable, argv, { ...environment,
     STACKBITE_HOME: path.resolve(installed.home) }, options);
