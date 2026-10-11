@@ -70,7 +70,7 @@ stackbite setup
 stackbite
 ```
 
-The core source repository remains private at `Shinick-Han/helm`. The separate
+The core source repository remains private at `shinick-dev/stackbite`. The separate
 public `Shinick-Han/stackbite` repository distributes only this thin launcher and
 verified compiled runtime releases; installers need no GitHub or npm login.
 Registry-free distribution does not require publishing rights on npm.
