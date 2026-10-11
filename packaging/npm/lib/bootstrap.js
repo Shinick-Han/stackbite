@@ -102,7 +102,9 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
   if (checkOnly) {
     if (!await existingCacheDirectory(cache)) fail('Pinned runtime is not cached; run stackbite setup.');
   } else await safeDirectory(cache);
-  const target = path.join(cache, `${spec.version}-${spec.commit}-${spec.key}-${spec.sha256}`);
+  // Full identity remains SHA-256 addressed while avoiding Windows MAX_PATH.
+  const cacheKey = createHash('sha256').update(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])).digest('hex');
+  const target = path.join(cache, `v1-${cacheKey}`);
   if (await exists(target)) {
     if (checkOnly || reportCached) progress('validate');
     const installed = { home: target, executable: await validatePayload(target, spec) };

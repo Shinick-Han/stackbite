@@ -144,3 +144,5 @@ Complete any registry-required authentication interactively; do not put credenti
 in this repository, prompts or package files. The repository currently specifies
 `UNLICENSED` for the JavaScript wrapper instead of inventing a license for the app;
 native runtime dependency notices remain in each platform archive.
+
+Runtime cache directories use a compact SHA-256 of the complete version, source commit, platform and archive identity. All full archive, manifest and file hashes are still verified on every launch. Existing longer cache directories are retained.

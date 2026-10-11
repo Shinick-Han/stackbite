@@ -176,7 +176,8 @@ test('native child receives literal argv/inherited stdio, custom state, actual h
   assert.deepEqual(actual.argv, argv); assert.equal(actual.state, path.join(area, 'owned state'));
   assert.equal(actual.home, path.dirname(invocation.executable));
   assert.equal(path.basename(invocation.executable), 'stackbite');
-  assert.ok(actual.home.endsWith(`${spec.key}-${spec.sha256}`));
+  assert.equal(path.basename(actual.home), `v1-${digest(Buffer.from(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])))}`);
+  assert.equal(path.basename(actual.home).length, 67);
 });
 test('state discovery stays native when the caller provides no state override', async t => {
   const area = await owned(t), value = fixture();
@@ -198,4 +199,18 @@ test('parent signals are forwarded and child signal termination/handlers are pre
   source.emit('SIGINT'); assert.deepEqual(forwarded, ['SIGINT']);
   child.emit('exit', null, 'SIGINT'); assert.deepEqual(await pending, { code: null, signal: 'SIGINT' });
   assert.equal(source.listenerCount('SIGINT'), 0); assert.equal(source.listenerCount('SIGTERM'), 0);
+});
+
+test('compact cache key keeps all identity bits and separates changes before cached reuse', async t => {
+  const cache = await owned(t), value = fixture(), spec = releaseSpec(value.manifest, 'linux', 'x64');
+  const original = await ensureBinary(spec, { cache, downloadImpl: writeFixture(value) });
+  assert.equal(path.basename(original.home).length, 67);
+  for (const change of [{commit: 'b'.repeat(40)}, {sha256: 'c'.repeat(64)}, {version: '0.0.1'}, {key: 'win32-x64'}]) {
+    let downloads = 0;
+    await assert.rejects(ensureBinary({...spec,...change}, {cache, downloadImpl: async () => {
+      downloads++; throw new Error('distinct identity reached download');
+    }}), /distinct identity reached download/);
+    assert.equal(downloads, 1);
+  }
+  assert.equal(await validatePayload(original.home, spec), original.executable);
 });
