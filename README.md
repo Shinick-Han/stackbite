@@ -61,14 +61,14 @@ Update a registry installation with `npm install --global stackbite@latest`.
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.30/stackbite-0.5.30.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.31/stackbite-0.5.31.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.30/stackbite-0.5.30.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.31/stackbite-0.5.31.tgz
 stackbite setup
 stackbite
 ```
