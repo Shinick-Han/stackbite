@@ -3,7 +3,10 @@
 Work Stack organizes the work. Stackbite gets it moving.
 
 Node.js 20 or newer is required. The portable runtime is available for Windows x64
-and Linux x64 with glibc 2.39 or newer; macOS, ARM and musl/Alpine builds are not supplied yet.
+and Linux x64 with glibc 2.28 or newer; macOS, ARM and musl/Alpine builds are not supplied yet.
+The GNU Linux x86_64 runtime is built to target AlmaLinux 8 (glibc 2.28), so a
+newer host system glibc is not required. Node.js 20 or newer remains a separate
+prerequisite of the launcher itself.
 Python installation and compilation are unnecessary. Archive extraction requires
 `tar` (included in current Windows and common Linux distributions).
 
@@ -58,14 +61,14 @@ Update a registry installation with `npm install --global stackbite@latest`.
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.29/stackbite-0.5.29.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.30/stackbite-0.5.30.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.29/stackbite-0.5.29.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.30/stackbite-0.5.30.tgz
 stackbite setup
 stackbite
 ```
@@ -119,7 +122,7 @@ Build and verify both native platform archives first. Prepare the pinned manifes
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.27
+python scripts/prepare_npm_release.py --version 0.5.30
 npm test
 npm pack
 ```
