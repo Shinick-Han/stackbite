@@ -64,7 +64,14 @@ esac
 printf 'Installed StackBite: %s\n' "$launcher"
 cleanup
 trap - EXIT HUP INT TERM
-if [ "$run" = yes ] && [ -t 1 ] && [ -r /dev/tty ]; then
+if [ "$run" = yes ] && [ -t 1 ]; then
     printf 'Starting StackBite...\n'
-    "$launcher" < /dev/tty
+    if [ -t 0 ]; then
+        "$launcher"
+    else
+        exec 3<&1
+        terminal=$(tty <&3)
+        exec 3<&-
+        "$launcher" < "$terminal"
+    fi
 fi
