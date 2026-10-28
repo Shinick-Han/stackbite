@@ -97,14 +97,14 @@ without Developer ID signing or notarization. Mac updates use the shared install
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.77/stackbite-0.5.77.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.78/stackbite-0.5.78.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.77/stackbite-0.5.77.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.78/stackbite-0.5.78.tgz
 stackbite setup
 stackbite
 ```
@@ -158,7 +158,7 @@ Build and verify all three native platform archives first. Prepare the pinned ma
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.77
+python scripts/prepare_npm_release.py --version 0.5.78
 npm test
 npm pack
 ```
