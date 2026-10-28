@@ -2,10 +2,12 @@
 
 Work Stack organizes the work. Stackbite gets it moving.
 
-Node.js 20 or newer is required. The portable runtime is available for Windows x64
-and Linux x64 with glibc; macOS, ARM and musl/Alpine builds are not supplied yet.
+Node.js 20 or newer is required. The portable runtime is available for Windows x64,
+Linux x64 with glibc, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
+The Mac build is qualified on M4 with macOS 26.2. Intel Mac, Linux ARM and
+musl/Alpine builds are not supplied.
 Python installation and compilation are unnecessary. Archive extraction requires
-`tar` (included in current Windows and common Linux distributions).
+`tar` (included in macOS, current Windows and common Linux distributions).
 
 ## Install without an account
 
@@ -45,13 +47,24 @@ The launcher check is read-only; npx itself may install its npm package before
 invoking it, so use the installed command for an entirely offline check.
 
 Binary caches use `%LOCALAPPDATA%\Stackbite\cache` on Windows and
-`${XDG_CACHE_HOME:-~/.cache}/stackbite` on Linux. `LOCALAPPDATA`, `XDG_CACHE_HOME`
+`${XDG_CACHE_HOME:-~/.cache}/stackbite` on Linux and macOS. `LOCALAPPDATA`, `XDG_CACHE_HOME`
 and `HOME` overrides retain their normal behavior. These caches are separate from
 application state. Interrupted preparation removes only its own temporary staging
 directory and can be retried. An invalid existing runtime is reported and left in
 place; setup does not delete or overwrite it.
 
 Update a registry installation with `npm install --global stackbite@latest`.
+
+On a Mac, use the native Apple Silicon Node.js installation so that
+`node -p process.arch` prints `arm64`. Install and sign in to provider CLIs such
+as Codex or Claude separately. Stackbite can open without a provider login.
+The Mac binaries use ad-hoc signing; they are not Developer ID signed or notarized.
+
+Preview product removal with `stackbite uninstall` (`stackbite delete` is an
+alias). Choose `--keep-data --apply` to retain data/hooks or `--all --apply`
+to remove selected product data/hooks too. Removal uses only an already cached
+verified runtime and never downloads one. Shared Helm/custom state and npm's
+own package registration/cache are preserved. See [removal and recovery](../../docs/uninstall.md).
 
 ## Direct GitHub package
 
@@ -99,6 +112,14 @@ Check the connected server's capabilities before using newly added runtime featu
 For app commands, the launcher inherits terminal input/output and passes CLI
 arguments directly to the native app. Its `setup` command only prepares/checks the
 runtime. It does not insert a second screen renderer or an agent provider.
+Frontend selection belongs to the native runtime: the launcher adds no
+`STACKBITE_FRONTEND` value and passes the caller's value unchanged. Installed
+native runtimes built from current source open the Rust screen when nothing
+selects a frontend; `--frontend python`, `STACKBITE_FRONTEND=python` or a saved
+`stackbite config set frontend python` keep Python, in that precedence. A missing
+or invalid Rust frontend exits with an error and does not fall back to Python. The
+release pinned in `release.json` determines which runtime behavior a package
+delivers.
 Global npm installation creates only the `stackbite` command; it does not claim an
 external `helm` command or replace independent Kubernetes tooling.
 

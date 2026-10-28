@@ -192,6 +192,24 @@ test('state discovery stays native when the caller provides no state override', 
   assert.deepEqual(JSON.parse(await fs.readFile(receipt, 'utf8')), { hasState: false });
 });
 
+test('launcher leaves frontend selection to the native runtime and keeps a caller opt-in', async t => {
+  const area = await owned(t), value = fixture();
+  const stub = path.join(area, 'frontend-stub.js'), receipt = path.join(area, 'frontend-receipt.json');
+  await fs.writeFile(stub, "require('node:fs').writeFileSync(process.env.OWNED_RECEIPT, JSON.stringify({has:Object.hasOwn(process.env,'STACKBITE_FRONTEND'),value:process.env.STACKBITE_FRONTEND??null,argv:process.argv.slice(2)}));");
+  const launch = async (extra, argv) => {
+    const environment = { ...process.env, OWNED_RECEIPT: receipt, ...extra };
+    if (!Object.hasOwn(extra, 'STACKBITE_FRONTEND')) delete environment.STACKBITE_FRONTEND;
+    const result = await main(argv, { manifest: value.manifest, platform: 'linux', arch: 'x64',
+      cache: path.join(area, 'cache'), downloadImpl: writeFixture(value), environment,
+      spawnImpl(executable, args, options) { return spawn(process.execPath, [stub, ...args], options); } });
+    assert.deepEqual(result, { code: 0, signal: null });
+    return JSON.parse(await fs.readFile(receipt, 'utf8'));
+  };
+  assert.deepEqual(await launch({}, []), { has: false, value: null, argv: [] });
+  assert.deepEqual(await launch({ STACKBITE_FRONTEND: 'python' }, []), { has: true, value: 'python', argv: [] });
+  assert.deepEqual(await launch({}, ['--frontend', 'python']), { has: false, value: null, argv: ['--frontend', 'python'] });
+});
+
 test('parent signals are forwarded and child signal termination/handlers are preserved', async () => {
   const source = new EventEmitter(), child = new EventEmitter(), forwarded = [];
   child.kill = signal => forwarded.push(signal);
@@ -213,4 +231,69 @@ test('compact cache key keeps all identity bits and separates changes before cac
     assert.equal(downloads, 1);
   }
   assert.equal(await validatePayload(original.home, spec), original.executable);
+});
+test('concurrent cached validation still hashes every byte of every pinned member', async t => {
+  const area = await owned(t), extra = {};
+  for (let index = 0; index < 48; index++) extra[`bulk/f${String(index).padStart(2, '0')}.bin`] = Buffer.alloc(65536 + index, index);
+  const value = fixture('linux', {}, extra), spec = releaseSpec(value.manifest, 'linux', 'x64');
+  const result = await ensureBinary(spec, { cache: area, downloadImpl: writeFixture(value) });
+  assert.equal(await validatePayload(result.home, spec), result.executable);
+  for (const name of ['bulk/f00.bin', 'bulk/f47.bin']) {
+    const file = path.join(result.home, ...name.split('/')), original = await fs.readFile(file);
+    const changed = Buffer.from(original); changed[changed.length - 1] ^= 1;
+    await fs.writeFile(file, changed);
+    await assert.rejects(validatePayload(result.home, spec), { message: `Release file SHA-256 mismatch: ${name}` });
+    await fs.writeFile(file, original);
+  }
+  assert.equal(await validatePayload(result.home, spec), result.executable);
+});
+test('a walk failure wins over pending member hashes and leaves no unhandled rejection', async t => {
+  const area = await owned(t), value = fixture(), spec = releaseSpec(value.manifest, 'linux', 'x64');
+  const result = await ensureBinary(spec, { cache: path.join(area, 'cache'), downloadImpl: writeFixture(value) });
+  await fs.writeFile(path.join(result.home, 'runtime', 'owned.txt'), 'tampered');
+  const outside = path.join(area, 'outside');
+  await fs.mkdir(outside); await fs.writeFile(path.join(outside, 'file'), 'outside');
+  try { await fs.symlink(outside, path.join(result.home, 'zz-link'), process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (error) { if (error.code === 'EPERM') return t.skip('Host cannot create disposable directory links'); throw error; }
+  const unhandled = [], record = reason => unhandled.push(reason);
+  process.on('unhandledRejection', record);
+  try {
+    await assert.rejects(validatePayload(result.home, spec), /escapes the cache root/);
+    await new Promise(resolve => setImmediate(resolve));
+  } finally { process.removeListener('unhandledRejection', record); }
+  assert.deepEqual(unhandled, []);
+});
+
+
+test('macOS arm64 selects the pinned payload and validates Mach-O and portable identity', async t => {
+  const area = await owned(t), value = fixture('darwin');
+  const spec = releaseSpec(value.manifest, 'darwin', 'arm64');
+  assert.equal(spec.host, 'macos-arm64');
+  const installed = await ensureBinary(spec, { cache: path.join(area, 'cache'), downloadImpl: writeFixture(value) });
+  assert.equal(await validatePayload(installed.home, spec), installed.executable);
+  const badPlatform = fixture('darwin', { platform: 'linux-x86_64' });
+  await assert.rejects(ensureBinary(releaseSpec(badPlatform.manifest, 'darwin', 'arm64'), { cache: path.join(area, 'bad-platform'), downloadImpl: writeFixture(badPlatform) }), /identity mismatch/);
+  const badImage = fixture('darwin', {}, { stackbite: Buffer.from('cffaedfe070000010000000002000000', 'hex') });
+  await assert.rejects(ensureBinary(releaseSpec(badImage.manifest, 'darwin', 'arm64'), { cache: path.join(area, 'bad-image'), downloadImpl: writeFixture(badImage) }), /executable identity/);
+});
+
+
+test('macOS setup caches the runtime and normal launch passes the verified executable to spawn', async t => {
+  const area = await owned(t), value = fixture('darwin'), cache = path.join(area, 'cache');
+  const options = { manifest: value.manifest, platform: 'darwin', arch: 'arm64', cache,
+    downloadImpl: writeFixture(value), environment: {}, progress: () => {} };
+  assert.deepEqual(await main(['setup'], { ...options, spawnImpl: () => assert.fail('setup must not launch') }), { code: 0, signal: null });
+  let invoked;
+  const result = await main(['--version'], { ...options, downloadImpl: () => assert.fail('warm launch must use cache'),
+    spawnImpl(executable, args, config) {
+      invoked = { executable, args, config };
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit('exit', 0, null));
+      return child;
+    } });
+  assert.deepEqual(result, { code: 0, signal: null });
+  assert.equal(path.basename(invoked.executable), 'stackbite');
+  assert.deepEqual(invoked.args, ['--version']);
+  assert.equal(invoked.config.shell, false);
+  assert.equal(invoked.config.env.STACKBITE_HOME, path.dirname(invoked.executable));
 });

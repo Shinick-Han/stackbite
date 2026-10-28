@@ -27,7 +27,7 @@ common interface. Windows Command Prompt and custom shells use different syntax.
 
 Node.js 20 or newer is required. The portable runtime is available for Windows x64
 Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
-The Mac build was tested on an M4 running macOS 26.2. Intel Mac, Linux ARM and musl/Alpine builds are not supplied.
+Intel Mac, Linux ARM and musl/Alpine builds are not supplied.
 The GNU Linux x86_64 runtime is built to target AlmaLinux 8 (glibc 2.28), so a
 newer host system glibc is not required. Node.js 20 or newer remains a separate
 prerequisite of the launcher itself.
@@ -82,21 +82,21 @@ Update a registry installation with `npm install --global stackbite@latest`.
 
 On Mac, use native Apple Silicon Node.js (`node -p process.arch` prints `arm64`).
 Provider CLI installation and login are separate. Mac binaries are ad-hoc signed,
-without Developer ID signing or notarization. Mac updates use npm.
+without Developer ID signing or notarization. Mac updates use the shared installer or npm.
 
 ## Direct GitHub package
 
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.75/stackbite-0.5.75.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.76/stackbite-0.5.76.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.75/stackbite-0.5.75.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.76/stackbite-0.5.76.tgz
 stackbite setup
 stackbite
 ```
@@ -150,7 +150,7 @@ Build and verify all three native platform archives first. Prepare the pinned ma
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.75
+python scripts/prepare_npm_release.py --version 0.5.76
 npm test
 npm pack
 ```

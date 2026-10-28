@@ -13,6 +13,21 @@ function secureURL(value) {
   }
   return url;
 }
+// The redirect response is discarded; its bounded location must resolve to an approved origin.
+function redirectTarget(response, redirects, current) {
+  const location = response.headers.location;
+  response.destroy();
+  if (redirects === 5 || typeof location !== 'string' || location.length > 4096) fail('Invalid release redirect');
+  return secureURL(new URL(location, current).href);
+}
+// Only an identity-encoded 200 whose declared length (if any) is the pinned size is read.
+function acceptResponse(response, spec) {
+  if (response.statusCode !== 200 || (response.headers['content-encoding'] && response.headers['content-encoding'] !== 'identity')) {
+    response.destroy(); fail('Release download was not available');
+  }
+  const length = response.headers['content-length'];
+  if (length !== undefined && String(spec.size) !== length) { response.destroy(); fail('Release download size mismatch'); }
+}
 async function download(spec, destination, { request = https.get, timeout = LIMITS.timeout } = {}) {
   if (!Number.isSafeInteger(spec.size) || spec.size <= 0 || spec.size > LIMITS.download) fail('Invalid pinned download size');
   const controller = new AbortController();
@@ -27,17 +42,10 @@ async function download(spec, destination, { request = https.get, timeout = LIMI
         req.once('error', () => reject(new Error('Release download failed or timed out')));
       });
       if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
-        const location = response.headers.location;
-        response.destroy();
-        if (redirects === 5 || typeof location !== 'string' || location.length > 4096) fail('Invalid release redirect');
-        current = secureURL(new URL(location, current).href);
+        current = redirectTarget(response, redirects, current);
         continue;
       }
-      if (response.statusCode !== 200 || (response.headers['content-encoding'] && response.headers['content-encoding'] !== 'identity')) {
-        response.destroy(); fail('Release download was not available');
-      }
-      const length = response.headers['content-length'];
-      if (length !== undefined && String(spec.size) !== length) { response.destroy(); fail('Release download size mismatch'); }
+      acceptResponse(response, spec);
       let size = 0;
       const bounded = new Transform({ transform(chunk, encoding, callback) {
         size += chunk.length;

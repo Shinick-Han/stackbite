@@ -8,11 +8,11 @@ const { download } = require('./download');
 const { extractArchive } = require('./archive');
 const { cacheDirectory, existingCacheDirectory } = require('./cache');
 const { parseSetup, stageReporter } = require('./setup');
+const timing = require('./startup-timing');
 const packageVersion = require('../../../package.json').version;
 
-function releaseSpec(manifest, platform = process.platform, arch = process.arch, runtime = {}) {
-  const key = `${platform}-${arch}`;
-  if (!['win32-x64', 'linux-x64'].includes(key)) fail(`Stackbite does not have a native release for ${key}; supported platforms are Windows x64 and Linux x64.`);
+// Only a glibc Linux host (or an injected runtime report) may select the Linux release.
+function checkLinuxRuntime(platform, runtime) {
   if (platform === 'linux' && (process.platform === 'linux' || Object.hasOwn(runtime, 'glibcVersionRuntime'))) {
     const glibc = Object.hasOwn(runtime, 'glibcVersionRuntime')
       ? runtime.glibcVersionRuntime : process.report.getReport().header.glibcVersionRuntime;
@@ -20,28 +20,46 @@ function releaseSpec(manifest, platform = process.platform, arch = process.arch,
       fail('Stackbite requires Linux x64 with glibc; Alpine/musl Linux is unsupported. No release was downloaded.');
     }
   }
+}
+function checkReleaseIdentity(manifest) {
   if (manifest.schema !== 1 || manifest.version !== packageVersion || !/^[a-f0-9]{40}$/.test(manifest.commit)
       || manifest.repository !== 'Shinick-Han/stackbite') fail('Invalid pinned Stackbite release identity');
-  const spec = manifest.platforms?.[key];
-  const host = platform === 'win32' ? 'windows-x64' : 'linux-x86_64';
-  const root = `stackbite-${manifest.version}-${host}-${manifest.commit.slice(0, 12)}`;
-  const asset = root + (platform === 'win32' ? '.zip' : '.tar.gz');
+}
+// The platform entry must name exactly the derived root, asset and GitHub release URL.
+function checkPinnedAsset(spec, manifest, root, asset) {
   if (!spec || spec.root !== root || spec.asset !== asset
       || spec.url !== `https://github.com/${manifest.repository}/releases/download/v${manifest.version}/${asset}`
       || ![spec.sha256, spec.manifestSha256, spec.metadataSha256].every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))
       || !Number.isSafeInteger(spec.size) || spec.size <= 0 || spec.size > LIMITS.download) fail('Invalid pinned release asset');
+}
+function releaseSpec(manifest, platform = process.platform, arch = process.arch, runtime = {}) {
+  const key = `${platform}-${arch}`;
+  if (!['win32-x64', 'linux-x64', 'darwin-arm64'].includes(key)) fail(`Stackbite does not have a native release for ${key}; supported platforms are Windows x64, Linux x64 and macOS arm64.`);
+  checkLinuxRuntime(platform, runtime);
+  checkReleaseIdentity(manifest);
+  const spec = manifest.platforms?.[key];
+  const host = { win32: 'windows-x64', linux: 'linux-x86_64', darwin: 'macos-arm64' }[platform];
+  const root = `stackbite-${manifest.version}-${host}-${manifest.commit.slice(0, 12)}`;
+  const asset = root + (platform === 'win32' ? '.zip' : '.tar.gz');
+  checkPinnedAsset(spec, manifest, root, asset);
   return { ...spec, key, platform, host, version: manifest.version, commit: manifest.commit };
 }
-async function validatePayload(directory, spec) {
+async function payloadRoot(directory) {
   const info = await fs.lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) fail('Cached release root is not a regular directory');
-  const root = await fs.realpath(directory);
+  return fs.realpath(directory);
+}
+// Both pinned documents are read before either digest is compared, then parsed in the same order.
+async function pinnedDocuments(root, spec) {
   const manifestPath = path.join(root, 'SHA256SUMS.json'), metadataPath = path.join(root, 'portable.json');
   const manifestBytes = await readSmall(manifestPath), metadataBytes = await readSmall(metadataPath, 16384);
   if (createHash('sha256').update(manifestBytes).digest('hex') !== spec.manifestSha256
       || createHash('sha256').update(metadataBytes).digest('hex') !== spec.metadataSha256) fail('Pinned release manifest or metadata SHA-256 mismatch');
   const hashes = JSON.parse(manifestBytes.toString('utf8'));
   const metadata = JSON.parse(metadataBytes.toString('utf8'));
+  return { hashes, metadata };
+}
+function expectedMembers(hashes) {
   if (!hashes || Array.isArray(hashes) || typeof hashes !== 'object' || !Object.keys(hashes).length
       || Object.keys(hashes).length > LIMITS.members) fail('Invalid release file manifest');
   const expected = new Set();
@@ -50,8 +68,29 @@ async function validatePayload(directory, spec) {
     expected.add(name);
   }
   if (!expected.has('portable.json') || !expected.has('runtime/build-info.json')) fail('Required release metadata is missing');
-  const actual = new Set();
+  return expected;
+}
+// Runs at most `limit` tasks at once; queued tasks start in submission order.
+function boundedRunner(limit) {
+  let active = 0;
+  const queue = [];
+  function next() {
+    if (active >= limit || !queue.length) return;
+    const { task, resolve, reject } = queue.shift();
+    active++;
+    task().then(resolve, reject).finally(() => { active--; next(); });
+  }
+  return task => new Promise((resolve, reject) => { queue.push({ task, resolve, reject }); next(); });
+}
+// Bounded concurrency overlaps file reads; every pinned member is still hashed in full.
+const HASH_CONCURRENCY = 8;
+// Walks the payload; every file or in-root link must resolve to a bounded regular file and pinned members must match.
+async function payloadFiles(root, expected, hashes) {
+  const actual = new Set(), run = boundedRunner(HASH_CONCURRENCY), checks = [];
   let total = 0, entries = 0;
+  async function checkHash(relative, resolved) {
+    if (await hashFile(resolved) !== hashes[relative]) fail(`Release file SHA-256 mismatch: ${relative}`);
+  }
   async function visit(directoryPath) {
     for (const name of await fs.readdir(directoryPath)) {
       if (++entries > LIMITS.members * 2) fail('Cached release has too many entries');
@@ -67,34 +106,61 @@ async function validatePayload(directory, spec) {
       total += resolvedInfo.size;
       if (total > LIMITS.expanded) fail('Cached release exceeds expansion limit');
       actual.add(relative);
-      if (expected.has(relative) && await hashFile(resolved) !== hashes[relative]) fail(`Release file SHA-256 mismatch: ${relative}`);
+      // Each check settles to its error (or null) at once, so none is ever an unhandled rejection.
+      if (expected.has(relative)) checks.push(run(() => checkHash(relative, resolved)).then(() => null, error => error));
     }
   }
-  await visit(root);
+  // Every started read settles before returning or failing; a walk failure takes precedence,
+  // otherwise the first mismatch in walk order is reported.
+  const walkError = await visit(root).then(() => null, error => error);
+  const hashErrors = await Promise.all(checks);
+  if (walkError) throw walkError;
+  const mismatch = hashErrors.find(Boolean);
+  if (mismatch) throw mismatch;
+  return actual;
+}
+// The checksum documents themselves are the only unhashed members; Linux also ships the text form.
+async function checkMemberSet(root, spec, hashes, expected, actual) {
   expected.add('SHA256SUMS.json');
-  if (spec.platform === 'linux') {
+  if (spec.platform !== 'win32') {
     expected.add('SHA256SUMS');
     const text = await readSmall(path.join(root, 'SHA256SUMS'));
-    if (text.toString('utf8') !== Object.entries(hashes).map(([name, digest]) => `${digest}  ${name}\n`).join('')) fail('Linux checksum text disagrees with pinned manifest');
+    if (text.toString('utf8') !== Object.entries(hashes).map(([name, digest]) => `${digest}  ${name}\n`).join('')) fail(`${spec.platform === 'linux' ? 'Linux' : 'macOS'} checksum text disagrees with pinned manifest`);
   }
   if (actual.size !== expected.size || [...actual].some(name => !expected.has(name))) fail('Release files disagree with pinned manifest');
+}
+async function checkProductIdentity(root, spec, metadata) {
   const build = JSON.parse((await readSmall(path.join(root, 'runtime', 'build-info.json'), 16384)).toString('utf8'));
   for (const value of [metadata, build]) {
     if (value.version !== spec.version || value.commit !== spec.commit || value.product !== 'Stackbite'
         || (value.command !== undefined && value.command !== 'stackbite')
-        || (value.platform !== undefined && value.platform !== spec.host)) fail('Release product/version/commit identity mismatch');
+        || ((spec.platform === 'darwin' || value.platform !== undefined) && value.platform !== spec.host)) fail('Release product/version/commit identity mismatch');
   }
+}
+async function nativeExecutable(root, spec) {
   const executable = path.join(root, spec.platform === 'win32' ? 'stackbite.exe' : 'stackbite');
   const image = await fs.lstat(executable);
   if (!image.isFile() || image.isSymbolicLink()) fail('Native release executable is missing or a link');
   const file = await fs.open(executable, 'r');
   try {
-    const magic = Buffer.alloc(4);
-    if ((await file.read(magic, 0, 4, 0)).bytesRead !== 4
-        || !(spec.platform === 'win32' ? magic.subarray(0, 2).equals(Buffer.from('MZ')) : magic.equals(Buffer.from([0x7f, 69, 76, 70])))) fail('Invalid native executable identity');
+    const header = Buffer.alloc(spec.platform === 'darwin' ? 16 : 4);
+    if ((await file.read(header, 0, header.length, 0)).bytesRead !== header.length) fail('Invalid native executable identity');
+    const valid = spec.platform === 'win32' ? header.subarray(0, 2).equals(Buffer.from('MZ'))
+      : spec.platform === 'darwin' ? header.readUInt32LE(0) === 0xfeedfacf && header.readUInt32LE(4) === 0x0100000c && header.readUInt32LE(12) === 2
+      : header.equals(Buffer.from([0x7f, 69, 76, 70]));
+    if (!valid) fail('Invalid native executable identity');
   } finally { await file.close(); }
-  if (spec.platform === 'linux' && process.platform !== 'win32' && !(image.mode & 0o111)) fail('Native release executable has no execute permission');
+  if (spec.platform !== 'win32' && process.platform !== 'win32' && !(image.mode & 0o111)) fail('Native release executable has no execute permission');
   return executable;
+}
+async function validatePayload(directory, spec) {
+  const root = await payloadRoot(directory);
+  const { hashes, metadata } = await pinnedDocuments(root, spec);
+  const expected = expectedMembers(hashes);
+  const actual = await payloadFiles(root, expected, hashes);
+  await checkMemberSet(root, spec, hashes, expected, actual);
+  await checkProductIdentity(root, spec, metadata);
+  return nativeExecutable(root, spec);
 }
 async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
   checkOnly = false, reportCached = false, progress = () => {} } = {}) {
@@ -160,16 +226,23 @@ async function launchNative(executable, argv, environment, { spawnImpl = spawn, 
 }
 async function main(argv = process.argv.slice(2), options = {}) {
   const setup = parseSetup(argv);
+  const removing = ['uninstall', 'delete'].includes(argv[0]);
   const manifest = options.manifest || require('../release.json');
   const platform = options.platform || process.platform;
   const environment = options.environment || process.env;
   const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
-  const installed = await ensureBinary(spec, { ...options, cache: options.cache || cacheDirectory(environment, platform),
-    checkOnly: setup?.checkOnly || false, reportCached: Boolean(setup),
-    progress: options.progress || stageReporter(options.stderr || process.stderr) });
+  // Every launch still verifies the full pinned payload; timing only observes it.
+  const installed = await timing.phase(environment, 'launcher.ensure', () => ensureBinary(spec, { ...options,
+    cache: options.cache || cacheDirectory(environment, platform),
+    checkOnly: removing || setup?.checkOnly || false, reportCached: Boolean(setup),
+    progress: options.progress || stageReporter(options.stderr || process.stderr) }));
   if (setup) return { code: 0, signal: null };
+  timing.mark(environment, 'launcher.exec');
   // The bundled runtime owns state discovery and migration for every entrypoint.
-  return launchNative(installed.executable, argv, { ...environment,
+  const result = await launchNative(installed.executable, argv, { ...environment,
     STACKBITE_HOME: path.resolve(installed.home) }, options);
+  if (!removing) return result;
+  const { removeRegistration } = require('./uninstall-registration');
+  return removeRegistration(argv, result, environment, launchNative, options);
 }
 module.exports = { releaseSpec, validatePayload, ensureBinary, launchNative, main };
