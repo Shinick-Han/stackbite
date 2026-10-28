@@ -2,26 +2,34 @@
 
 Work Stack organizes the work. Stackbite gets it moving.
 
-## Install with one shared command
+## Install StackBite
 
-Paste the same line into Windows PowerShell 5.1/7, macOS Zsh/Bash, or Linux Sh/Bash:
+Open [bitefoundry.dev/stackbite](https://bitefoundry.dev/stackbite) to copy the command for your OS.
+
+Windows PowerShell:
+
+```powershell
+irm https://bitefoundry.dev/stackbite/w | iex
+```
+
+macOS and Linux:
+
+```sh
+curl -fsSL https://bitefoundry.dev/stackbite | sh
+```
+
+Node.js and Python are not required. The installer verifies the pinned native archive, retains existing data and running processes, and installs for your user. In an interactive terminal it opens StackBite. Run `stackbite` from a new terminal afterward. Provider CLI installation and login are separate.
+
+Supported: Windows x64, Apple Silicon macOS 13+, and Linux x64 with glibc 2.28+.
+
+<details>
+<summary>Shared command for Windows PowerShell, macOS and Linux</summary>
 
 ```sh
 curl https://raw.githubusercontent.com/Shinick-Han/stackbite/main/install.cmd -o "$HOME/.stackbite-install.cmd"; . "$HOME/.stackbite-install.cmd" $?
 ```
 
-It downloads a small entry file to your home directory, selects the native
-installer, verifies its pinned archive SHA-256, and installs StackBite for your
-user. Node.js, Python, WSL, Git Bash, and a compiler are not required. POSIX
-systems use their existing curl and standard shell tools; Windows PowerShell
-uses its built-in tools. In an interactive terminal, installation opens StackBite.
-Run `stackbite` from a new terminal afterward. Provider CLI installation and login
-are separate.
-
-The installers retain existing data and running processes. Windows updates the
-user PATH; POSIX installation adds `~/.local/bin` to the selected shell profile
-when needed and preserves existing settings. The bare command above is the
-common interface. Windows Command Prompt and custom shells use different syntax.
+</details>
 
 ## Install through npm or npx
 
