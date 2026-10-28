@@ -39,6 +39,7 @@ case ":${PATH:-}:" in
         profile=
         case "${SHELL:-}" in
             */zsh) profile=${ZDOTDIR:-$HOME}/.zshrc ;;
+            */sh|*/dash) profile=$HOME/.profile ;;
             */bash)
                 if [ "$hash" = shasum ]; then
                     profile=$HOME/.bash_profile

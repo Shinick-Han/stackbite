@@ -2,22 +2,26 @@
 
 Work Stack organizes the work. Stackbite gets it moving.
 
-## Install on Mac with one command
+## Install with one shared command
 
-On an Apple Silicon Mac (macOS 13 or newer), paste this into Terminal:
+Paste the same line into Windows PowerShell 5.1/7, macOS Zsh/Bash, or Linux Sh/Bash:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Shinick-Han/stackbite/main/install.sh | sh
+curl https://raw.githubusercontent.com/Shinick-Han/stackbite/main/install.cmd -o "$HOME/.stackbite-install.cmd"; . "$HOME/.stackbite-install.cmd" $?
 ```
 
-This downloads the pinned release, checks its SHA-256, installs it for your user,
-and opens StackBite. Node.js and Python are not required. In a new terminal, run
-`stackbite`. Provider CLI installation and login are separate.
+It downloads a small entry file to your home directory, selects the native
+installer, verifies its pinned archive SHA-256, and installs StackBite for your
+user. Node.js, Python, WSL, Git Bash, and a compiler are not required. POSIX
+systems use their existing curl and standard shell tools; Windows PowerShell
+uses its built-in tools. In an interactive terminal, installation opens StackBite.
+Run `stackbite` from a new terminal afterward. Provider CLI installation and login
+are separate.
 
-The installer adds `~/.local/bin` to the active zsh or bash profile when needed.
-It preserves existing settings and prints the full launcher path if that profile
-cannot be changed. To install without opening the app, append
-`-s -- --no-run` to the final `sh` command.
+The installers retain existing data and running processes. Windows updates the
+user PATH; POSIX installation adds `~/.local/bin` to the selected shell profile
+when needed and preserves existing settings. The bare command above is the
+common interface. Windows Command Prompt and custom shells use different syntax.
 
 ## Install through npm or npx
 
