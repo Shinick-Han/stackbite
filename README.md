@@ -3,12 +3,13 @@
 Work Stack organizes the work. Stackbite gets it moving.
 
 Node.js 20 or newer is required. The portable runtime is available for Windows x64
-and Linux x64 with glibc 2.28 or newer; macOS, ARM and musl/Alpine builds are not supplied yet.
+Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
+The Mac build was tested on an M4 running macOS 26.2. Intel Mac, Linux ARM and musl/Alpine builds are not supplied.
 The GNU Linux x86_64 runtime is built to target AlmaLinux 8 (glibc 2.28), so a
 newer host system glibc is not required. Node.js 20 or newer remains a separate
 prerequisite of the launcher itself.
 Python installation and compilation are unnecessary. Archive extraction requires
-`tar` (included in current Windows and common Linux distributions).
+`tar` (included in macOS, current Windows and common Linux distributions).
 
 ## Install without an account
 
@@ -48,7 +49,7 @@ The launcher check is read-only; npx itself may install its npm package before
 invoking it, so use the installed command for an entirely offline check.
 
 Binary caches use `%LOCALAPPDATA%\Stackbite\cache` on Windows and
-`${XDG_CACHE_HOME:-~/.cache}/stackbite` on Linux. `LOCALAPPDATA`, `XDG_CACHE_HOME`
+`${XDG_CACHE_HOME:-~/.cache}/stackbite` on Linux and macOS. `LOCALAPPDATA`, `XDG_CACHE_HOME`
 and `HOME` overrides retain their normal behavior. These caches are separate from
 application state. Interrupted preparation removes only its own temporary staging
 directory and can be retried. An invalid existing runtime is reported and left in
@@ -56,19 +57,23 @@ place; setup does not delete or overwrite it.
 
 Update a registry installation with `npm install --global stackbite@latest`.
 
+On Mac, use native Apple Silicon Node.js (`node -p process.arch` prints `arm64`).
+Provider CLI installation and login are separate. Mac binaries are ad-hoc signed,
+without Developer ID signing or notarization. Mac updates use npm.
+
 ## Direct GitHub package
 
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.31/stackbite-0.5.31.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.75/stackbite-0.5.75.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.31/stackbite-0.5.31.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.75/stackbite-0.5.75.tgz
 stackbite setup
 stackbite
 ```
@@ -118,11 +123,11 @@ The measurement reports fixture sizes and each preparation stage plus warm check
 and launch validation costs. It uses disposable cache data and an inert child
 stub; its timings are not measurements of released native bundles or providers.
 
-Build and verify both native platform archives first. Prepare the pinned manifest
+Build and verify all three native platform archives first. Prepare the pinned manifest
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.30
+python scripts/prepare_npm_release.py --version 0.5.75
 npm test
 npm pack
 ```
@@ -130,7 +135,7 @@ npm pack
 Keep `package.json` and `packaging/npm/release.json` versions equal. Inspect `npm
 pack --dry-run` before publishing; the package must include the launcher and pinned
 manifest, and exclude native runtimes, installed state, credentials, tests and
-development worktrees. Test the packed package with `npx` on both platforms.
+development worktrees. Test the packed package with `npx` on each supported platform.
 
 Attach `stackbite-<version>.tgz` and its SHA-256 sidecar to the corresponding GitHub
 release in the public distribution repository. Copy only the npm file allowlist to
