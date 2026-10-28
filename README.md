@@ -1,6 +1,25 @@
-# Stackbite through npm and npx
+# StackBite
 
 Work Stack organizes the work. Stackbite gets it moving.
+
+## Install on Mac with one command
+
+On an Apple Silicon Mac (macOS 13 or newer), paste this into Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shinick-Han/stackbite/main/install.sh | sh
+```
+
+This downloads the pinned release, checks its SHA-256, installs it for your user,
+and opens StackBite. Node.js and Python are not required. In a new terminal, run
+`stackbite`. Provider CLI installation and login are separate.
+
+The installer adds `~/.local/bin` to the active zsh or bash profile when needed.
+It preserves existing settings and prints the full launcher path if that profile
+cannot be changed. To install without opening the app, append
+`-s -- --no-run` to the final `sh` command.
+
+## Install through npm or npx
 
 Node.js 20 or newer is required. The portable runtime is available for Windows x64
 Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
