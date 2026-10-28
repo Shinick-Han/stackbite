@@ -89,14 +89,14 @@ without Developer ID signing or notarization. Mac updates use the shared install
 Run the package attached to the verified GitHub release:
 
 ```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.76/stackbite-0.5.76.tgz
+npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.77/stackbite-0.5.77.tgz
 ```
 
 Arguments go after the package URL, for example `--version` or `--status`. For a
 persistent command, install that same package globally:
 
 ```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.76/stackbite-0.5.76.tgz
+npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.77/stackbite-0.5.77.tgz
 stackbite setup
 stackbite
 ```
@@ -150,7 +150,7 @@ Build and verify all three native platform archives first. Prepare the pinned ma
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.76
+python scripts/prepare_npm_release.py --version 0.5.77
 npm test
 npm pack
 ```
@@ -175,3 +175,7 @@ Complete any registry-required authentication interactively; do not put credenti
 in this repository, prompts or package files. The repository currently specifies
 `UNLICENSED` for the JavaScript wrapper instead of inventing a license for the app;
 native runtime dependency notices remain in each platform archive.
+
+## Keyboard shortcuts
+
+Press `Ctrl+B`, then `?` for Help. Use `w` for a new Room, `c` for a new Seat, `f` to focus the list, and `q` to close the window while keeping Seats running. These letters follow `Ctrl+B`. Change direct bindings in Settings → Keyboard shortcuts.
