@@ -141,8 +141,8 @@ async function checkProductIdentity(root, spec, metadata) {
         || ((spec.platform === 'darwin' || value.platform !== undefined) && value.platform !== spec.host)) fail('Release product/version/commit identity mismatch');
   }
 }
-async function nativeExecutable(root, spec) {
-  const executable = path.join(root, spec.platform === 'win32' ? 'stackbite.exe' : 'stackbite');
+async function nativeExecutable(root, spec, name = 'stackbite') {
+  const executable = path.join(root, name + (spec.platform === 'win32' ? '.exe' : ''));
   const image = await fs.lstat(executable);
   if (!image.isFile() || image.isSymbolicLink()) fail('Native release executable is missing or a link');
   const file = await fs.open(executable, 'r');
@@ -157,6 +157,28 @@ async function nativeExecutable(root, spec) {
   if (spec.platform !== 'win32' && process.platform !== 'win32' && !(image.mode & 0o111)) fail('Native release executable has no execute permission');
   return executable;
 }
+// The release pins the whole payload before this mapping. Old releases keep
+// their original engine; a present native entry is never silently bypassed.
+async function publicExecutable(root, spec, hashes) {
+  const engine = await nativeExecutable(root, spec);
+  const name = 'stackbite-launcher' + (spec.platform === 'win32' ? '.exe' : '');
+  if (!Object.hasOwn(hashes, name)) {
+    if (await exists(path.join(root, name))) fail('Native entry is present without a release pin');
+    return engine;
+  }
+  const manifest = JSON.parse((await readSmall(path.join(root, 'manifest.json'))).toString('utf8'));
+  const entry = manifest.binaries?.['stackbite-launcher'], info = entry?.build_info;
+  const target = { win32: 'x86_64-pc-windows-msvc', linux: 'x86_64-unknown-linux-gnu', darwin: 'aarch64-apple-darwin' }[spec.platform];
+  if (manifest.schema !== 'stackbite-rust-terminal-build-v1' || manifest.product !== 'Stackbite'
+      || manifest.version !== spec.version || manifest.commit !== spec.commit || manifest.target !== target || manifest.protocol !== 1
+      || !entry || Object.keys(entry).sort().join(',') !== 'build_info,path,sha256'
+      || entry.path !== name || entry.sha256 !== hashes[name] || manifest.artifacts?.[name]?.sha256 !== hashes[name]
+      || manifest.artifacts?.[name]?.kind !== 'binary' || !Number.isSafeInteger(manifest.artifacts?.[name]?.size) || manifest.artifacts[name].size < 1
+      || !info || Object.keys(info).sort().join(',') !== 'binary,commit,product,protocol,target,version'
+      || info.product !== 'Stackbite' || info.binary !== 'stackbite-launcher' || info.version !== spec.version
+      || info.commit !== spec.commit || info.target !== target || info.protocol !== 1) fail('Native entry package identity or pin is invalid');
+  return nativeExecutable(root, spec, 'stackbite-launcher');
+}
 async function validatePayload(directory, spec, { includePhone = true } = {}) {
   const root = await payloadRoot(directory);
   const { hashes, metadata } = await pinnedDocuments(root, spec);
@@ -165,7 +187,7 @@ async function validatePayload(directory, spec, { includePhone = true } = {}) {
   const actual = await payloadFiles(root, expected, hashes, includePhone);
   await checkMemberSet(root, spec, hashes, expected, actual);
   await checkProductIdentity(root, spec, metadata);
-  return nativeExecutable(root, spec);
+  return publicExecutable(root, spec, hashes);
 }
 async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
   checkOnly = false, reportCached = false, includePhone = false, progress = () => {} } = {}) {
