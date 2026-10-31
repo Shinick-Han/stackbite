@@ -82,10 +82,10 @@ function boundedRunner(limit) {
   }
   return task => new Promise((resolve, reject) => { queue.push({ task, resolve, reject }); next(); });
 }
-// Bounded concurrency overlaps file reads; every pinned member is still hashed in full.
+// Bounded concurrency overlaps selected file reads; every selected member is hashed in full.
 const HASH_CONCURRENCY = 8;
 // Walks the payload; every file or in-root link must resolve to a bounded regular file and pinned members must match.
-async function payloadFiles(root, expected, hashes) {
+async function payloadFiles(root, expected, hashes, includePhone) {
   const actual = new Set(), run = boundedRunner(HASH_CONCURRENCY), checks = [];
   let total = 0, entries = 0;
   async function checkHash(relative, resolved) {
@@ -93,6 +93,9 @@ async function payloadFiles(root, expected, hashes) {
   }
   async function visit(directoryPath) {
     for (const name of await fs.readdir(directoryPath)) {
+      // Optional Phone is checked at activation. Do not traverse an unused tree,
+      // including a missing or redirected tree; selected runtime links cannot use it.
+      if (!includePhone && directoryPath === root && name === 'phone') continue;
       if (++entries > LIMITS.members * 2) fail('Cached release has too many entries');
       const target = path.join(directoryPath, name), relative = path.relative(root, target).split(path.sep).join('/');
       memberPath(relative);
@@ -101,6 +104,7 @@ async function payloadFiles(root, expected, hashes) {
       if (!entry.isFile() && !entry.isSymbolicLink()) fail('Release contains a special file');
       const resolved = await fs.realpath(target);
       if (!inside(root, resolved)) fail('Release link escapes the cache root');
+      if (!includePhone && path.relative(root, resolved).split(path.sep)[0] === 'phone') fail('Runtime link resolves into optional Phone payload');
       const resolvedInfo = await fs.lstat(resolved);
       if (!resolvedInfo.isFile() || resolvedInfo.size > LIMITS.member) fail('Release link does not resolve to a bounded regular file');
       total += resolvedInfo.size;
@@ -153,17 +157,18 @@ async function nativeExecutable(root, spec) {
   if (spec.platform !== 'win32' && process.platform !== 'win32' && !(image.mode & 0o111)) fail('Native release executable has no execute permission');
   return executable;
 }
-async function validatePayload(directory, spec) {
+async function validatePayload(directory, spec, { includePhone = true } = {}) {
   const root = await payloadRoot(directory);
   const { hashes, metadata } = await pinnedDocuments(root, spec);
   const expected = expectedMembers(hashes);
-  const actual = await payloadFiles(root, expected, hashes);
+  if (!includePhone) for (const name of expected) if (name.startsWith('phone/')) expected.delete(name);
+  const actual = await payloadFiles(root, expected, hashes, includePhone);
   await checkMemberSet(root, spec, hashes, expected, actual);
   await checkProductIdentity(root, spec, metadata);
   return nativeExecutable(root, spec);
 }
 async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
-  checkOnly = false, reportCached = false, progress = () => {} } = {}) {
+  checkOnly = false, reportCached = false, includePhone = false, progress = () => {} } = {}) {
   cache = path.resolve(cache);
   if (checkOnly) {
     if (!await existingCacheDirectory(cache)) fail('Pinned runtime is not cached; run stackbite setup.');
@@ -173,7 +178,7 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
   const target = path.join(cache, `v1-${cacheKey}`);
   if (await exists(target)) {
     if (checkOnly || reportCached) progress('validate');
-    const installed = { home: target, executable: await validatePayload(target, spec) };
+    const installed = { home: target, executable: await validatePayload(target, spec, { includePhone }) };
     if (checkOnly || reportCached) progress('ready');
     return installed;
   }
@@ -231,10 +236,12 @@ async function main(argv = process.argv.slice(2), options = {}) {
   const platform = options.platform || process.platform;
   const environment = options.environment || process.env;
   const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
-  // Every launch still verifies the full pinned payload; timing only observes it.
+  // First install always verifies everything. Cached TUI/runtime starts defer only
+  // Phone; explicit phone/setup/removal commands retain the full pinned check.
   const installed = await timing.phase(environment, 'launcher.ensure', () => ensureBinary(spec, { ...options,
     cache: options.cache || cacheDirectory(environment, platform),
     checkOnly: removing || setup?.checkOnly || false, reportCached: Boolean(setup),
+    includePhone: removing || Boolean(setup) || argv[0] === 'phone',
     progress: options.progress || stageReporter(options.stderr || process.stderr) }));
   if (setup) return { code: 0, signal: null };
   timing.mark(environment, 'launcher.exec');
