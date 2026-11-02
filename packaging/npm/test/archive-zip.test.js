@@ -23,40 +23,51 @@ function extraField(kind, length = 0) {
   field.writeUInt16LE(kind, 0); field.writeUInt16LE(length, 2);
   return field;
 }
+// Values shared by a record's local header and its central directory entry.
+function recordFields(record) {
+  const name = Buffer.from(record.name), data = Buffer.from(record.data || '');
+  const method = record.method ?? (data.length ? 8 : 0);
+  const compressed = record.raw ?? (method === 8 ? deflateRawSync(data) : data);
+  const crc = record.crc ?? crc32(data), expanded = record.expanded ?? data.length;
+  const flags = record.flags ?? 0x0800, extra = record.extra || Buffer.alloc(0), localExtra = record.localExtra || Buffer.alloc(0);
+  const localName = Buffer.from(record.localName ?? record.name);
+  return { name, method, compressed, crc, expanded, flags, extra, localExtra, localName };
+}
+function localRecord(record, { method, compressed, crc, expanded, flags, localExtra, localName }) {
+  const header = Buffer.alloc(30);
+  header.writeUInt32LE(0x04034b50, 0); header.writeUInt16LE(20, 4); header.writeUInt16LE(record.localFlags ?? flags, 6);
+  header.writeUInt16LE(record.localMethod ?? method, 8);
+  if (!record.zeroLocalSizes) {
+    header.writeUInt32LE(record.localCrc ?? crc, 14); header.writeUInt32LE(compressed.length, 18);
+    header.writeUInt32LE(record.localExpanded ?? expanded, 22);
+  }
+  header.writeUInt16LE(localName.length, 26); header.writeUInt16LE(localExtra.length, 28);
+  return [header, localName, localExtra, compressed, record.descriptor || Buffer.alloc(0)];
+}
+function centralRecord(record, { name, method, compressed, crc, expanded, flags, extra }, offset) {
+  const directory = Buffer.alloc(46);
+  directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(0x0314, 4); directory.writeUInt16LE(20, 6);
+  directory.writeUInt16LE(flags, 8); directory.writeUInt16LE(method, 10);
+  directory.writeUInt32LE(crc, 16); directory.writeUInt32LE(compressed.length, 20); directory.writeUInt32LE(expanded, 24);
+  directory.writeUInt16LE(name.length, 28); directory.writeUInt16LE(extra.length, 30);
+  directory.writeUInt16LE(record.commentBytes?.length ?? 0, 32); directory.writeUInt16LE(record.diskStart ?? 0, 34);
+  const mode = record.mode ?? (record.name.endsWith('/') ? 0o040755 : 0o100644);
+  directory.writeUInt32LE(((mode << 16) | (record.attributes ?? 0)) >>> 0, 38);
+  directory.writeUInt32LE(record.localOffset ?? offset, 42);
+  return [directory, name, extra, record.commentBytes || Buffer.alloc(0)];
+}
 // Each record may override any central or local field; offsets are returned for byte surgery.
 function build(records, { comment = Buffer.alloc(0) } = {}) {
   const local = [], central = [], localOffsets = [], centralPositions = [];
   let offset = 0, position = 0;
   for (const record of records) {
-    const name = Buffer.from(record.name), data = Buffer.from(record.data || '');
-    const method = record.method ?? (data.length ? 8 : 0);
-    const compressed = record.raw ?? (method === 8 ? deflateRawSync(data) : data);
-    const crc = record.crc ?? crc32(data), expanded = record.expanded ?? data.length;
-    const flags = record.flags ?? 0x0800, extra = record.extra || Buffer.alloc(0), localExtra = record.localExtra || Buffer.alloc(0);
-    const localName = Buffer.from(record.localName ?? record.name);
-    const header = Buffer.alloc(30);
-    header.writeUInt32LE(0x04034b50, 0); header.writeUInt16LE(20, 4); header.writeUInt16LE(record.localFlags ?? flags, 6);
-    header.writeUInt16LE(record.localMethod ?? method, 8);
-    if (!record.zeroLocalSizes) {
-      header.writeUInt32LE(record.localCrc ?? crc, 14); header.writeUInt32LE(compressed.length, 18);
-      header.writeUInt32LE(record.localExpanded ?? expanded, 22);
-    }
-    header.writeUInt16LE(localName.length, 26); header.writeUInt16LE(localExtra.length, 28);
+    const fields = recordFields(record);
     localOffsets.push(offset);
-    local.push(header, localName, localExtra, compressed, record.descriptor || Buffer.alloc(0));
-    const directory = Buffer.alloc(46);
-    directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(0x0314, 4); directory.writeUInt16LE(20, 6);
-    directory.writeUInt16LE(flags, 8); directory.writeUInt16LE(method, 10);
-    directory.writeUInt32LE(crc, 16); directory.writeUInt32LE(compressed.length, 20); directory.writeUInt32LE(expanded, 24);
-    directory.writeUInt16LE(name.length, 28); directory.writeUInt16LE(extra.length, 30);
-    directory.writeUInt16LE(record.commentBytes?.length ?? 0, 32); directory.writeUInt16LE(record.diskStart ?? 0, 34);
-    const mode = record.mode ?? (record.name.endsWith('/') ? 0o040755 : 0o100644);
-    directory.writeUInt32LE(((mode << 16) | (record.attributes ?? 0)) >>> 0, 38);
-    directory.writeUInt32LE(record.localOffset ?? offset, 42);
+    local.push(...localRecord(record, fields));
     centralPositions.push(position);
-    const entry = [directory, name, extra, record.commentBytes || Buffer.alloc(0)];
+    const entry = centralRecord(record, fields, offset);
     central.push(...entry); position += Buffer.concat(entry).length;
-    offset += 30 + localName.length + localExtra.length + compressed.length + (record.descriptor?.length ?? 0);
+    offset += 30 + fields.localName.length + fields.localExtra.length + fields.compressed.length + (record.descriptor?.length ?? 0);
   }
   const directory = Buffer.concat(central), end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(records.length, 8); end.writeUInt16LE(records.length, 10);

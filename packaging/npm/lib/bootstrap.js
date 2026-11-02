@@ -171,16 +171,25 @@ async function publicExecutable(root, spec, hashes) {
   const manifest = JSON.parse((await readSmall(path.join(root, 'manifest.json'))).toString('utf8'));
   const entry = manifest.binaries?.['stackbite-launcher'], info = entry?.build_info;
   const target = { win32: 'x86_64-pc-windows-msvc', linux: 'x86_64-unknown-linux-gnu', darwin: 'aarch64-apple-darwin' }[spec.platform];
-  if (manifest.schema !== 'stackbite-rust-terminal-build-v1' || manifest.product !== 'Stackbite'
-      || manifest.version !== spec.version || manifest.commit !== spec.commit || manifest.target !== target || manifest.protocol !== 1
-      || !entry || Object.keys(entry).sort().join(',') !== 'build_info,path,sha256'
-      || entry.path !== name || entry.sha256 !== hashes[name] || manifest.artifacts?.[name]?.sha256 !== hashes[name]
-      || manifest.artifacts?.[name]?.kind !== 'binary' || !Number.isSafeInteger(manifest.artifacts?.[name]?.size) || manifest.artifacts[name].size < 1
-      || !info || Object.keys(info).sort().join(',') !== 'binary,commit,product,protocol,target,version'
-      || info.product !== 'Stackbite' || info.binary !== 'stackbite-launcher' || info.version !== spec.version
-      || info.commit !== spec.commit || info.target !== target || info.protocol !== 1) fail('Native entry package identity or pin is invalid');
+  if (!terminalBuildMatches(manifest, spec, target) || !launcherPinMatches(manifest, entry, name, hashes)
+      || !launcherBuildInfoMatches(info, spec, target)) fail('Native entry package identity or pin is invalid');
   const launcher = await nativeExecutable(root, spec, 'stackbite-launcher');
   return spec.platform === 'win32' ? engine : launcher;
+}
+function terminalBuildMatches(manifest, spec, target) {
+  return manifest.schema === 'stackbite-rust-terminal-build-v1' && manifest.product === 'Stackbite'
+    && manifest.version === spec.version && manifest.commit === spec.commit && manifest.target === target && manifest.protocol === 1;
+}
+// The manifest entry and its artifact record both pin the release hash of `name`.
+function launcherPinMatches(manifest, entry, name, hashes) {
+  return !!entry && Object.keys(entry).sort().join(',') === 'build_info,path,sha256'
+    && entry.path === name && entry.sha256 === hashes[name] && manifest.artifacts?.[name]?.sha256 === hashes[name]
+    && manifest.artifacts?.[name]?.kind === 'binary' && Number.isSafeInteger(manifest.artifacts?.[name]?.size) && !(manifest.artifacts[name].size < 1);
+}
+function launcherBuildInfoMatches(info, spec, target) {
+  return !!info && Object.keys(info).sort().join(',') === 'binary,commit,product,protocol,target,version'
+    && info.product === 'Stackbite' && info.binary === 'stackbite-launcher' && info.version === spec.version
+    && info.commit === spec.commit && info.target === target && info.protocol === 1;
 }
 async function validatePayload(directory, spec, { includePhone = true } = {}) {
   const root = await payloadRoot(directory);
@@ -301,34 +310,40 @@ async function assertBaseline(environment, platform) {
   if (Buffer.byteLength(raw) > 16384) fail('Invalid installation baseline');
   const expected = JSON.parse(raw), root = installationRoot(environment, platform);
   if (expected.preparation !== undefined) {
-    const pin = expected.preparation, file = path.join(root, '.stackbite-update', 'update.lock');
-    if (Object.keys(expected).sort().join(',') !== 'preparation,root' || expected.root !== root
-        || !pin || Object.keys(pin).sort().join(',') !== 'identity,path' || pin.path !== file || !pin.identity) fail('Invalid installation preparation');
-    let identity = pin.identity;
-    const actual = await baselinePin(file);
-    if (platform === 'win32' && actual) identity = { ...identity, device: (BigInt(identity.device) & 0xffffffffn).toString() };
-    if (JSON.stringify(actual) !== JSON.stringify(identity)) fail('Installation changed while staging');
+    await assertPreparationBaseline(expected, root, platform);
     return;
   }
-  let current = null;
+  const current = await locatorInstallationId(root);
+  if (expected.root !== root || expected.incarnation !== current) fail('Installation changed while staging');
+  if (current === null) await assertLegacyBaseline(expected, platform);
+}
+// Python-origin restrictions retain FILE_ID_INFO's full volume serial;
+// libuv reports its 32-bit component. The engine still checks the full pin.
+function libuvIdentity(platform, actual, identity) {
+  return platform === 'win32' && actual && identity ? { ...identity, device: (BigInt(identity.device) & 0xffffffffn).toString() } : identity;
+}
+async function assertPreparationBaseline(expected, root, platform) {
+  const pin = expected.preparation, file = path.join(root, '.stackbite-update', 'update.lock');
+  if (Object.keys(expected).sort().join(',') !== 'preparation,root' || expected.root !== root
+      || !pin || Object.keys(pin).sort().join(',') !== 'identity,path' || pin.path !== file || !pin.identity) fail('Invalid installation preparation');
+  const actual = await baselinePin(file);
+  if (JSON.stringify(actual) !== JSON.stringify(libuvIdentity(platform, actual, pin.identity))) fail('Installation changed while staging');
+}
+// The first present locator's incarnation; null for a legacy or absent locator.
+async function locatorInstallationId(root) {
   for (const name of ['default-install.json', 'install.json']) {
     const file = path.join(root, name);
     if (!await exists(file)) continue;
     const value = JSON.parse((await readSmall(file, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
-    current = value.installation_id ?? null;
-    break;
+    return value.installation_id ?? null;
   }
-  if (expected.root !== root || expected.incarnation !== current) fail('Installation changed while staging');
-  if (current === null) {
-    if (!Array.isArray(expected.legacy) || !expected.legacy.length || expected.legacy.length > 32) fail('Invalid legacy installation baseline');
-    for (const pin of expected.legacy) {
-      const actual = await baselinePin(pin.path);
-      let identity = pin.identity;
-      // Python-origin restrictions retain FILE_ID_INFO's full volume serial;
-      // libuv reports its 32-bit component. The engine still checks the full pin.
-      if (platform === 'win32' && actual && identity) identity = { ...identity, device: (BigInt(identity.device) & 0xffffffffn).toString() };
-      if (JSON.stringify(actual) !== JSON.stringify(identity)) fail('Installation changed while staging');
-    }
+  return null;
+}
+async function assertLegacyBaseline(expected, platform) {
+  if (!Array.isArray(expected.legacy) || !expected.legacy.length || expected.legacy.length > 32) fail('Invalid legacy installation baseline');
+  for (const pin of expected.legacy) {
+    const actual = await baselinePin(pin.path);
+    if (JSON.stringify(actual) !== JSON.stringify(libuvIdentity(platform, actual, pin.identity))) fail('Installation changed while staging');
   }
 }
 
@@ -390,6 +405,30 @@ async function settlePreparation(preparation, environment, platform, source) {
   } finally { await preparation.handle.close(); }
 }
 
+// Identities of the candidates that this mkdir created (the first created directory and below).
+async function createdDirectories(firstCreated, candidates) {
+  const directories = [];
+  if (firstCreated) {
+    for (const selected of candidates) {
+      // libuv may return a Windows namespace spelling for the first directory.
+      const createdName = path.toNamespacedPath(firstCreated), selectedName = path.toNamespacedPath(selected);
+      if (selectedName === createdName || selectedName.startsWith(createdName + path.sep)) {
+        directories.push([selected, await fs.lstat(selected, { bigint: true })]);
+      }
+    }
+  }
+  return directories;
+}
+// Creates the control file, or opens the existing one; `created` marks ours.
+async function openPreparationFile(file) {
+  const constants = require('node:fs').constants;
+  try {
+    return { handle: await fs.open(file, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW || 0), 0o600), created: true };
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    return { handle: await fs.open(file, constants.O_RDWR | (constants.O_NOFOLLOW || 0)), created: false };
+  }
+}
 async function reservePreparation(environment, platform, target, source) {
   if (Object.hasOwn(environment, 'STACKBITE_INSTALL_BASELINE')) return null;
   let baseline = await captureBaseline(environment, platform, target);
@@ -410,26 +449,10 @@ async function reservePreparation(environment, platform, target, source) {
   if (source) await source.validate();
   const firstCreated = await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   await existingCacheDirectory(directory);
-  const directories = [];
-  if (firstCreated) {
-    for (const selected of [directory, root]) {
-      // libuv may return a Windows namespace spelling for the first directory.
-      const createdName = path.toNamespacedPath(firstCreated), selectedName = path.toNamespacedPath(selected);
-      if (selectedName === createdName || selectedName.startsWith(createdName + path.sep)) {
-        directories.push([selected, await fs.lstat(selected, { bigint: true })]);
-      }
-    }
-  }
-  const constants = require('node:fs').constants;
+  const directories = await createdDirectories(firstCreated, [directory, root]);
   const file = path.join(directory, 'update.lock');
-  let handle, created = false, preparation;
-  try {
-    handle = await fs.open(file, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW || 0), 0o600);
-    created = true;
-  } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    handle = await fs.open(file, constants.O_RDWR | (constants.O_NOFOLLOW || 0));
-  }
+  const { handle, created } = await openPreparationFile(file);
+  let preparation;
   try {
     const held = await handle.stat({ bigint: true });
     const identity = await baselinePin(file);
