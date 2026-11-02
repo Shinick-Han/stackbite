@@ -32,6 +32,11 @@ first launch prepares the runtime with the same stages. Cached launches remain
 quiet and fully validate the runtime every time. Running both installation methods
 is unnecessary.
 
+The source bootstrapper selects the verified frozen `stackbite.exe` engine on
+Windows. Its installed defaults open the Rust TUI and native terminal owner.
+Linux and macOS select the verified `stackbite-launcher` when bundled. Every
+pinned file, including the Windows native launcher, is validated before launch.
+
 The same preparation command works through npx:
 
 ```sh

@@ -158,8 +158,9 @@ async function nativeExecutable(root, spec, name = 'stackbite') {
   if (spec.platform !== 'win32' && process.platform !== 'win32' && !(image.mode & 0o111)) fail('Native release executable has no execute permission');
   return executable;
 }
-// The release pins the whole payload before this mapping. Old releases keep
-// their original engine; a present native entry is never silently bypassed.
+// The release pins the whole payload before this mapping. Windows opens the
+// frozen engine, which selects the Rust TUI/owner; POSIX opens the native entry.
+// A bundled native entry is validated on every platform before either choice.
 async function publicExecutable(root, spec, hashes) {
   const engine = await nativeExecutable(root, spec);
   const name = 'stackbite-launcher' + (spec.platform === 'win32' ? '.exe' : '');
@@ -178,7 +179,8 @@ async function publicExecutable(root, spec, hashes) {
       || !info || Object.keys(info).sort().join(',') !== 'binary,commit,product,protocol,target,version'
       || info.product !== 'Stackbite' || info.binary !== 'stackbite-launcher' || info.version !== spec.version
       || info.commit !== spec.commit || info.target !== target || info.protocol !== 1) fail('Native entry package identity or pin is invalid');
-  return nativeExecutable(root, spec, 'stackbite-launcher');
+  const launcher = await nativeExecutable(root, spec, 'stackbite-launcher');
+  return spec.platform === 'win32' ? engine : launcher;
 }
 async function validatePayload(directory, spec, { includePhone = true } = {}) {
   const root = await payloadRoot(directory);
