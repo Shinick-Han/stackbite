@@ -212,20 +212,45 @@ async function admitPublication(environment, platform) {
   if (record.schema !== 'stackbite.uninstall.v1' || !['prepared', 'stopped', 'deferred', 'complete'].includes(record.phase)) {
     fail('Stackbite removal is in progress');
   }
-  let current = null;
+  const current = await locatorIncarnation(root);
+  const saved = record.install_identity;
+  if (saved != null && (saved.root !== root || !/^[a-f0-9]{32}$/.test(saved.incarnation))) fail('Invalid removal installation identity');
+  if (current && (!saved || current !== saved.incarnation)) return;
+  fail('Stackbite removal is in progress');
+}
+async function locatorIncarnation(root) {
   for (const name of ['default-install.json', 'install.json']) {
     const locator = path.join(root, name);
     if (!await exists(locator)) continue;
     const value = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
     if (!value || Array.isArray(value) || typeof value !== 'object'
         || (value.installation_id != null && !/^[a-f0-9]{32}$/.test(value.installation_id))) fail('Invalid Stackbite installation locator');
-    current = value.installation_id;
-    break;
+    return value.installation_id ?? null;
   }
-  const saved = record.install_identity;
-  if (saved != null && (saved.root !== root || !/^[a-f0-9]{32}$/.test(saved.incarnation))) fail('Invalid removal installation identity');
-  if (current && (!saved || current !== saved.incarnation)) return;
-  fail('Stackbite removal is in progress');
+  return null;
+}
+// An accepted removal of the CURRENT installation that stopped before its
+// capsule existed (no recovery_command). Only a release-pinned runtime from this
+// package can continue it. The digest binds the same request bytes until launch.
+async function acceptedRemovalWithoutCapsule(environment, platform) {
+  const root = installationRoot(environment, platform);
+  if (!await existingCacheDirectory(root)) return null;
+  const journal = path.join(root, '.stackbite-uninstall.json');
+  let info;
+  try { info = await fs.lstat(journal); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) fail('Unsafe removal journal');
+  const bytes = await readSmall(journal, 8 * 1024 * 1024);
+  const record = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+  const saved = record?.install_identity;
+  if (record?.schema !== 'stackbite.uninstall.v1' || record.phase !== 'prepared' || record.accepted !== true
+      || record.removal_requested !== true || record.recovery_command != null
+      || typeof record.request_id !== 'string' || !record.request_id
+      || saved?.root !== root || !/^[a-f0-9]{32}$/.test(saved.incarnation)) return null;
+  // A reinstall after this request (another incarnation) is not this removal's target.
+  const current = await locatorIncarnation(root);
+  if (current !== null && current !== saved.incarnation) return null;
+  return { journal, request: record.request_id, incarnation: saved.incarnation,
+    digest: createHash('sha256').update(bytes).digest('hex') };
 }
 
 async function baselinePin(file) {
@@ -455,7 +480,7 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
     await existingCacheDirectory(cache); // Validate existing ancestors without creating a cache.
   }
   if (checkOnly) {
-    if (!await existingCacheDirectory(cache)) fail('Pinned runtime is not cached; run stackbite setup.');
+    if (!await existingCacheDirectory(cache)) throw notCached();
   }
   // Full identity remains SHA-256 addressed while avoiding Windows MAX_PATH.
   const cacheKey = createHash('sha256').update(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])).digest('hex');
@@ -471,7 +496,7 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
       if (checkOnly || reportCached) progress('ready');
       return installed;
     }
-    if (checkOnly) fail('Pinned runtime is not cached; run stackbite setup.');
+    if (checkOnly) throw notCached();
     // An owned system-temp stage keeps downloads out of product caches. Only the
     // verified engine below can create/publish a canonical cache installation.
     await admitPublication(environment, spec.platform);
@@ -479,18 +504,7 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
     if (registrationSource) await registrationSource.validate();
     const staging = await fs.mkdtemp(path.join(os.tmpdir(), 'stackbite-npm-'));
     try {
-      const archive = path.join(staging, spec.asset), extraction = path.join(staging, 'extract');
-      await fs.mkdir(extraction, { mode: 0o700 });
-      progress('download');
-      await downloadImpl(spec, archive);
-      // Recheck at the extraction boundary, including for injected test transports.
-      progress('archive');
-      if ((await fs.stat(archive)).size !== spec.size || await hashFile(archive, LIMITS.download) !== spec.sha256) fail('Pinned archive SHA-256 or size mismatch');
-      progress('extract');
-      await extractImpl(archive, extraction, spec);
-      const payload = path.join(extraction, spec.root);
-      progress('validate');
-      await validatePayload(payload, spec);
+      const { payload } = await stageRelease(spec, staging, { downloadImpl, extractImpl, progress });
       progress('publish');
       await admitPublication(environment, spec.platform);
       await assertBaseline(environment, spec.platform);
@@ -501,13 +515,69 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
       const installed = { home: target, executable: await validatePayload(target, spec) };
       progress('ready');
       return installed;
-    } finally {
-      // Only this mkdtemp handle is owned by this invocation.
-      if (path.dirname(staging) !== path.resolve(os.tmpdir()) || !path.basename(staging).startsWith('stackbite-npm-')) fail('Unsafe staging cleanup path');
-      await fs.rm(staging, { recursive: true, force: true });
-    }
+    } finally { await removeStage(staging); }
   } finally {
     if (preparation) await settlePreparation(preparation, environment, spec.platform, registrationSource);
+  }
+}
+function notCached() {
+  return Object.assign(new Error('Pinned runtime is not cached; run stackbite setup.'), { code: 'STACKBITE_NOT_CACHED' });
+}
+// Download, size/hash, extract and validate the pinned archive inside an owned stage.
+async function stageRelease(spec, staging, { downloadImpl, extractImpl, progress }) {
+  const archive = path.join(staging, spec.asset), extraction = path.join(staging, 'extract');
+  await fs.mkdir(extraction, { mode: 0o700 });
+  progress('download');
+  await downloadImpl(spec, archive);
+  // Recheck at the extraction boundary, including for injected test transports.
+  progress('archive');
+  if ((await fs.stat(archive)).size !== spec.size || await hashFile(archive, LIMITS.download) !== spec.sha256) fail('Pinned archive SHA-256 or size mismatch');
+  progress('extract');
+  await extractImpl(archive, extraction, spec);
+  const payload = path.join(extraction, spec.root);
+  progress('validate');
+  return { payload, executable: await validatePayload(payload, spec) };
+}
+async function removeStage(staging) {
+  // Only this invocation's mkdtemp directory is owned.
+  if (path.dirname(staging) !== path.resolve(os.tmpdir()) || !path.basename(staging).startsWith('stackbite-npm-')) fail('Unsafe staging cleanup path');
+  await fs.rm(staging, { recursive: true, force: true });
+}
+// The fixed engine may hand removal to a helper started from its own image
+// (parent_resume.runtime). While the same journal still names that image, the
+// stage is the helper's runtime and stays; finalization removes the journal.
+async function stageStillNeeded(pending, staging) {
+  let record;
+  try { record = JSON.parse((await readSmall(pending.journal, 8 * 1024 * 1024)).toString('utf8').replace(/^\uFEFF/, '')); }
+  catch (error) { if (error.code === 'ENOENT') return false; return true; }
+  const runtime = record?.parent_resume?.runtime?.path;
+  if (record?.request_id !== pending.request || typeof runtime !== 'string' || !path.isAbsolute(runtime)) return false;
+  const roots = [staging, await fs.realpath(staging)];
+  return roots.some(root => inside(root, path.resolve(runtime)));
+}
+// Continue an accepted removal with a private, verified copy of this package's
+// pinned runtime. Nothing is published: no cache, locator, preparation or
+// installation identity is created, and only the original argv runs.
+async function continueAcceptedRemoval(spec, argv, environment, options) {
+  const pending = await acceptedRemovalWithoutCapsule(environment, spec.platform);
+  if (!pending) return null;
+  const staging = await fs.mkdtemp(path.join(os.tmpdir(), 'stackbite-npm-'));
+  let retained = false;
+  try {
+    const { payload, executable } = await stageRelease(spec, staging, {
+      downloadImpl: options.downloadImpl || download, extractImpl: options.extractImpl || extractArchive,
+      progress: options.progress || stageReporter(options.stderr || process.stderr) });
+    if (JSON.stringify(await acceptedRemovalWithoutCapsule(environment, spec.platform)) !== JSON.stringify(pending)) {
+      fail('Stackbite removal changed while staging its runtime; nothing was run');
+    }
+    const npm = await require('./uninstall-registration').descriptor(options);
+    const result = await launchNative(executable, argv, { ...environment,
+      ...(npm ? { STACKBITE_NPM_REGISTRATION: JSON.stringify(npm) } : {}),
+      STACKBITE_HOME: path.resolve(payload) }, options);
+    retained = await stageStillNeeded(pending, staging);
+    return result;
+  } finally {
+    if (!retained) await removeStage(staging);
   }
 }
 async function launchNative(executable, argv, environment, { spawnImpl = spawn, signalSource = process } = {}) {
@@ -553,6 +623,11 @@ async function main(argv = process.argv.slice(2), options = {}) {
       const { resumeWithoutRuntime, registrationOnly } = require('./uninstall-registration');
       const recovered = await resumeWithoutRuntime(argv, environment, launchNative, options);
       if (recovered) return recovered;
+      // Only an absent runtime qualifies; a corrupt or foreign cache stays an error.
+      if (error.code === 'STACKBITE_NOT_CACHED' && explicitApply(argv)) {
+        const continued = await continueAcceptedRemoval(spec, argv, environment, options);
+        if (continued) return continued;
+      }
       const registration = await registrationOnly(argv, environment, launchNative, options);
       if (registration) return registration;
       throw error;
