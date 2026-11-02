@@ -9,7 +9,7 @@ const os = require('node:os');
 const { EventEmitter } = require('node:events');
 const { main } = require('../lib/bootstrap');
 const timing = require('../lib/startup-timing');
-const { fixture } = require('./fixtures');
+const { fixture, publishFixture } = require('./fixtures');
 
 const KEYS = ['schema', 'pid', 'phase', 'start_ms', 'ms', 'wall_ms', 'outcome'];
 
@@ -35,7 +35,7 @@ async function records(file) {
 }
 function launch(area, value, environment, calls, argv = ['--rooms', 'secret-argument']) {
   return main(argv, { manifest: value.manifest, platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.35',
-    cache: path.join(area, 'cache'), downloadImpl: writeFixture(value), environment,
+    cache: path.join(area, 'cache'), downloadImpl: writeFixture(value), publishImpl: publishFixture, environment,
     progress: () => {}, spawnImpl: inertChild(calls) });
 }
 

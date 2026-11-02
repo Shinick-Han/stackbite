@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 const { main } = require('../lib/bootstrap');
-main().then(({ code, signal }) => {
+const path = require('node:path');
+main(process.argv.slice(2), { packageRoot: path.resolve(__dirname, '../../..') }).then(({ code, signal }) => {
   if (signal && process.platform !== 'win32') {
     process.kill(process.pid, signal);
   } else {

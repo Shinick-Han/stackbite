@@ -10,7 +10,7 @@ const { spawnSync } = require('node:child_process');
 const { main, ensureBinary, releaseSpec } = require('../lib/bootstrap');
 const { parseSetup } = require('../lib/setup');
 const { cacheDirectory } = require('../lib/cache');
-const { fixture } = require('./fixtures');
+const { fixture, publishFixture } = require('./fixtures');
 const { download } = require('../lib/download');
 
 async function owned(t) {
@@ -20,7 +20,7 @@ async function owned(t) {
 }
 function options(area, value = fixture()) {
   const output = [];
-  return { manifest: value.manifest, platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.35',
+  return { manifest: value.manifest, platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.35', publishImpl: publishFixture,
     cache: path.join(area, 'cache'), environment: { STACKBITE_STATE_DIR: path.join(area, 'state'), TOKEN: 'secret-fixture' },
     stderr: { write: text => output.push(text) }, output,
     downloadImpl: (_, destination) => fs.writeFile(destination, value.bytes, { flag: 'wx' }),
@@ -115,7 +115,7 @@ test('failed setup cleans its staging, publishes nothing and can be retried', as
   await assert.rejects(main(['setup'], { ...config, downloadImpl: async (_, destination) => {
     await fs.writeFile(destination, 'partial fixture'); throw new Error('owned download interrupted');
   } }), /interrupted/);
-  assert.deepEqual(await fs.readdir(config.cache), []);
+  await assert.rejects(fs.lstat(config.cache), { code: 'ENOENT' });
   assert.doesNotMatch(config.output.join(''), /ready/);
   await main(['setup'], config);
   assert.equal((await fs.readdir(config.cache)).length, 1);
@@ -187,4 +187,6 @@ test('cache defaults are local and existing platform overrides remain honored', 
   assert.equal(cacheDirectory({}, 'linux', home), path.join(home, '.cache', 'stackbite'));
   assert.equal(cacheDirectory({ HOME: home, XDG_CACHE_HOME: path.join(home, 'xdg') }, 'linux'), path.join(home, 'xdg', 'stackbite'));
   assert.equal(cacheDirectory({ LOCALAPPDATA: home }, 'win32'), path.join(home, 'Stackbite', 'cache'));
+  assert.equal(cacheDirectory({ USERPROFILE: home, HOME: path.join(home, 'other') }, 'win32'),
+    path.join(home, 'AppData', 'Local', 'Stackbite', 'cache'));
 });

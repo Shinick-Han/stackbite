@@ -1,9 +1,10 @@
 'use strict';
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists, safeDirectory } = require('./common');
+const { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists } = require('./common');
 const { download } = require('./download');
 const { extractArchive } = require('./archive');
 const { cacheDirectory, existingCacheDirectory } = require('./cache');
@@ -189,52 +190,322 @@ async function validatePayload(directory, spec, { includePhone = true } = {}) {
   await checkProductIdentity(root, spec, metadata);
   return publicExecutable(root, spec, hashes);
 }
+
+function installationRoot(environment, platform) {
+  const home = environment.USERPROFILE || environment.HOME || os.homedir();
+  // Python's locator/control root is distinct from npm's cache root.
+  return platform === 'win32'
+    ? path.resolve(environment.LOCALAPPDATA || home, 'Stackbite')
+    : path.resolve(environment.XDG_DATA_HOME || path.join(environment.HOME || home, '.local', 'share'), 'stackbite');
+}
+// Before a runtime is available, read the SAME journal without creating any
+// product directory. The verified bundled engine repeats this under OS locks
+// and owns cache/locator publication. This read is not a JavaScript flock.
+async function admitPublication(environment, platform) {
+  const root = installationRoot(environment, platform);
+  if (!await existingCacheDirectory(root)) return;
+  const journal = path.join(root, '.stackbite-uninstall.json');
+  if (!await exists(journal)) return;
+  const record = JSON.parse((await readSmall(journal, 8 * 1024 * 1024)).toString('utf8').replace(/^\uFEFF/, ''));
+  if (record.schema !== 'stackbite.uninstall.v1' || !['prepared', 'stopped', 'deferred', 'complete'].includes(record.phase)) {
+    fail('Stackbite removal is in progress');
+  }
+  let current = null;
+  for (const name of ['default-install.json', 'install.json']) {
+    const locator = path.join(root, name);
+    if (!await exists(locator)) continue;
+    const value = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
+    if (!value || Array.isArray(value) || typeof value !== 'object'
+        || (value.installation_id != null && !/^[a-f0-9]{32}$/.test(value.installation_id))) fail('Invalid Stackbite installation locator');
+    current = value.installation_id;
+    break;
+  }
+  const saved = record.install_identity;
+  if (saved != null && (saved.root !== root || !/^[a-f0-9]{32}$/.test(saved.incarnation))) fail('Invalid removal installation identity');
+  if (current && (!saved || current !== saved.incarnation)) return;
+  fail('Stackbite removal is in progress');
+}
+
+async function baselinePin(file) {
+  await existingCacheDirectory(path.dirname(file));
+  let info;
+  try { info = await fs.lstat(file, { bigint: true }); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) fail('Invalid installation baseline file');
+  return { device: info.dev.toString(), inode: info.ino.toString() };
+}
+async function captureBaseline(environment, platform, cachedHome) {
+  const root = installationRoot(environment, platform);
+  for (const name of ['default-install.json', 'install.json']) {
+    const file = path.join(root, name);
+    if (!await exists(file)) continue;
+    const value = JSON.parse((await readSmall(file, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
+    if (value.installation_id != null) {
+      if (!/^[a-f0-9]{32}$/.test(value.installation_id)) fail('Invalid installation incarnation');
+      return { root, incarnation: value.installation_id };
+    }
+    break;
+  }
+  const old = path.join(path.dirname(root), platform === 'win32' ? 'Helm' : 'helm');
+  const paths = [root, old].flatMap(base => ['default-install.json', 'install.json'].map(name => path.join(base, name)));
+  const home = platform === 'win32' ? environment.USERPROFILE || os.homedir() : environment.HOME || os.homedir();
+  paths.push(...(platform === 'win32' ? ['stackbite.cmd', 'stackbite-portable.cmd', 'stackbite.exe'] : ['stackbite'])
+    .map(name => path.join(home, '.local', 'bin', name)));
+  const homes = new Set([cachedHome]);
+  for (const file of paths.slice(0, 4)) {
+    if (!await exists(file)) continue;
+    const value = JSON.parse((await readSmall(file, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
+    if (typeof value.home === 'string' && path.isAbsolute(value.home)) homes.add(value.home);
+  }
+  for (const selected of homes) {
+    for (const name of ['portable.json', platform === 'win32' ? 'stackbite.exe' : 'stackbite', 'stackbite.py']) {
+      const file = path.join(selected, name);
+      if (await baselinePin(file) !== null) paths.push(file);
+    }
+  }
+  const legacy = [];
+  for (const file of new Set(paths)) legacy.push({ path: file, identity: await baselinePin(file) });
+  return legacy.some(pin => pin.identity !== null) ? { root, incarnation: null, legacy } : null;
+}
+
+async function assertBaseline(environment, platform) {
+  const raw = environment.STACKBITE_INSTALL_BASELINE;
+  if (raw === undefined) return;
+  if (Buffer.byteLength(raw) > 16384) fail('Invalid installation baseline');
+  const expected = JSON.parse(raw), root = installationRoot(environment, platform);
+  if (expected.preparation !== undefined) {
+    const pin = expected.preparation, file = path.join(root, '.stackbite-update', 'update.lock');
+    if (Object.keys(expected).sort().join(',') !== 'preparation,root' || expected.root !== root
+        || !pin || Object.keys(pin).sort().join(',') !== 'identity,path' || pin.path !== file || !pin.identity) fail('Invalid installation preparation');
+    let identity = pin.identity;
+    const actual = await baselinePin(file);
+    if (platform === 'win32' && actual) identity = { ...identity, device: (BigInt(identity.device) & 0xffffffffn).toString() };
+    if (JSON.stringify(actual) !== JSON.stringify(identity)) fail('Installation changed while staging');
+    return;
+  }
+  let current = null;
+  for (const name of ['default-install.json', 'install.json']) {
+    const file = path.join(root, name);
+    if (!await exists(file)) continue;
+    const value = JSON.parse((await readSmall(file, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
+    current = value.installation_id ?? null;
+    break;
+  }
+  if (expected.root !== root || expected.incarnation !== current) fail('Installation changed while staging');
+  if (current === null) {
+    if (!Array.isArray(expected.legacy) || !expected.legacy.length || expected.legacy.length > 32) fail('Invalid legacy installation baseline');
+    for (const pin of expected.legacy) {
+      const actual = await baselinePin(pin.path);
+      let identity = pin.identity;
+      // Python-origin restrictions retain FILE_ID_INFO's full volume serial;
+      // libuv reports its 32-bit component. The engine still checks the full pin.
+      if (platform === 'win32' && actual && identity) identity = { ...identity, device: (BigInt(identity.device) & 0xffffffffn).toString() };
+      if (JSON.stringify(actual) !== JSON.stringify(identity)) fail('Installation changed while staging');
+    }
+  }
+}
+
+async function pinRegistration(npm, options) {
+  if (!npm) return null;
+  const file = path.join(npm.root, 'package.json');
+  const handle = await fs.open(file, require('node:fs').constants.O_RDONLY | (require('node:fs').constants.O_NOFOLLOW || 0));
+  try {
+    const held = await handle.stat({ bigint: true }), root = await fs.lstat(npm.root, { bigint: true });
+    const identity = { device: held.dev.toString(), inode: held.ino.toString() };
+    const source = {
+      async validate() {
+        const current = await fs.lstat(npm.root, { bigint: true });
+        const descriptor = await require('./uninstall-registration').descriptor(options);
+        if (!held.isFile() || held.nlink !== 1n || !current.isDirectory() || current.isSymbolicLink()
+            || current.dev !== root.dev || current.ino !== root.ino
+            || JSON.stringify(await baselinePin(file)) !== JSON.stringify(identity)
+            || JSON.stringify(descriptor) !== JSON.stringify(npm)) fail('npm registration changed while staging');
+      },
+      async absent() {
+        try { await fs.lstat(npm.root); return false; }
+        catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+      },
+      close: () => handle.close()
+    };
+    await source.validate();
+    return source;
+  } catch (error) { await handle.close(); throw error; }
+}
+
+async function settlePreparation(preparation, environment, platform, source) {
+  try {
+    // Only the failed publisher's newly created object is ours. A replacement
+    // registration, locator, payload, control inode or foreign file survives.
+    if (!preparation.created || !source || !await source.absent()
+        || await captureBaseline(environment, platform, preparation.target)) return;
+    for (const [directory, pin] of preparation.directories) {
+      await existingCacheDirectory(directory);
+      const current = await fs.lstat(directory, { bigint: true });
+      if (current.dev !== pin.dev || current.ino !== pin.ino) return;
+    }
+    const { file, identity, handle } = preparation;
+    if (JSON.stringify(await baselinePin(file)) !== JSON.stringify(identity)) return;
+    const held = await handle.stat({ bigint: true });
+    if (!held.isFile() || held.nlink !== 1n || held.size > 1n) return;
+    const bytes = Buffer.alloc(2);
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+    // Windows' existing Python byte-range gate initializes this SAME inode.
+    if (BigInt(bytesRead) !== held.size || bytesRead === 1 && bytes[0] !== 0x30) return;
+    await fs.unlink(file);
+    for (const [directory, pin] of preparation.directories) {
+      await existingCacheDirectory(directory);
+      const current = await fs.lstat(directory, { bigint: true });
+      if (current.dev !== pin.dev || current.ino !== pin.ino) break;
+      await fs.rmdir(directory);
+    }
+  } catch (error) {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+  } finally { await preparation.handle.close(); }
+}
+
+async function reservePreparation(environment, platform, target, source) {
+  if (Object.hasOwn(environment, 'STACKBITE_INSTALL_BASELINE')) return null;
+  let baseline = await captureBaseline(environment, platform, target);
+  if (baseline) {
+    environment.STACKBITE_INSTALL_BASELINE = JSON.stringify(baseline);
+    return null;
+  }
+  // First use has no locator to pin. Hold the existing installation control
+  // file open across staging, with libuv's Windows delete sharing. This reserves
+  // object identity only; the bundled engine still takes the kernel gates.
+  const root = installationRoot(environment, platform), directory = path.join(root, '.stackbite-update');
+  await admitPublication(environment, platform);
+  await existingCacheDirectory(directory);
+  for (let parent = root; ; parent = path.dirname(parent)) {
+    if (await exists(path.join(parent, '.git'))) fail('Refusing installation preparation in a source repository');
+    if (parent === path.dirname(parent)) break;
+  }
+  if (source) await source.validate();
+  const firstCreated = await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  await existingCacheDirectory(directory);
+  const directories = [];
+  if (firstCreated) {
+    for (const selected of [directory, root]) {
+      // libuv may return a Windows namespace spelling for the first directory.
+      const createdName = path.toNamespacedPath(firstCreated), selectedName = path.toNamespacedPath(selected);
+      if (selectedName === createdName || selectedName.startsWith(createdName + path.sep)) {
+        directories.push([selected, await fs.lstat(selected, { bigint: true })]);
+      }
+    }
+  }
+  const constants = require('node:fs').constants;
+  const file = path.join(directory, 'update.lock');
+  let handle, created = false, preparation;
+  try {
+    handle = await fs.open(file, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW || 0), 0o600);
+    created = true;
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    handle = await fs.open(file, constants.O_RDWR | (constants.O_NOFOLLOW || 0));
+  }
+  try {
+    const held = await handle.stat({ bigint: true });
+    const identity = await baselinePin(file);
+    if (!held.isFile() || held.nlink !== 1n || JSON.stringify(identity) !== JSON.stringify({ device: held.dev.toString(), inode: held.ino.toString() })) fail('Invalid installation preparation');
+    preparation = { handle, file, identity, created, directories, target };
+    baseline = { root, preparation: { path: file, identity } };
+    environment.STACKBITE_INSTALL_BASELINE = JSON.stringify(baseline);
+    if (source) await source.validate();
+    await admitPublication(environment, platform);
+    await assertBaseline(environment, platform);
+    return preparation;
+  } catch (error) {
+    if (preparation) await settlePreparation(preparation, environment, platform, source);
+    else await handle.close();
+    throw error;
+  }
+}
+
+async function publishCache(payload, target, spec, options) {
+  await assertBaseline(options.environment, spec.platform);
+  if (options.existing) {
+    const root = installationRoot(options.environment, spec.platform);
+    for (const name of ['default-install.json', 'install.json']) {
+      const locator = path.join(root, name);
+      if (!await exists(locator)) continue;
+      const saved = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
+      const descriptor = options.environment.STACKBITE_NPM_REGISTRATION;
+      if (typeof saved.home === 'string' && path.isAbsolute(saved.home)
+          && typeof saved.state === 'string' && path.isAbsolute(saved.state) && /^[a-f0-9]{32}$/.test(saved.installation_id)
+          && (!descriptor || JSON.stringify(saved.npm_registration) === JSON.stringify(JSON.parse(descriptor)))) return;
+      break;
+    }
+  }
+  const engine = path.join(payload, 'stackbite' + (spec.platform === 'win32' ? '.exe' : ''));
+  const argv = options.existing ? ['--record-install', target]
+    : ['--record-install', target, '-', payload, 'cache'];
+  const result = await launchNative(engine, argv, { ...options.environment, STACKBITE_HOME: payload }, options);
+  if (result.code !== 0 || result.signal) fail('Runtime publication was refused');
+}
+
 async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
-  checkOnly = false, reportCached = false, includePhone = false, progress = () => {} } = {}) {
+  checkOnly = false, reportCached = false, includePhone = false, progress = () => {},
+  environment = process.env, publishImpl = publishCache, registrationSource = null, ...options } = {}) {
   cache = path.resolve(cache);
+  environment = { ...environment };
+  if (!checkOnly) {
+    await admitPublication(environment, spec.platform);
+    await existingCacheDirectory(cache); // Validate existing ancestors without creating a cache.
+  }
   if (checkOnly) {
     if (!await existingCacheDirectory(cache)) fail('Pinned runtime is not cached; run stackbite setup.');
-  } else await safeDirectory(cache);
+  }
   // Full identity remains SHA-256 addressed while avoiding Windows MAX_PATH.
   const cacheKey = createHash('sha256').update(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])).digest('hex');
   const target = path.join(cache, `v1-${cacheKey}`);
-  if (await exists(target)) {
-    if (checkOnly || reportCached) progress('validate');
-    const installed = { home: target, executable: await validatePayload(target, spec, { includePhone }) };
-    if (checkOnly || reportCached) progress('ready');
-    return installed;
-  }
-  if (checkOnly) fail('Pinned runtime is not cached; run stackbite setup.');
-  const staging = await fs.mkdtemp(path.join(cache, '.staging-'));
+  const preparation = !checkOnly ? await reservePreparation(environment, spec.platform, target, registrationSource) : null;
   try {
-    const archive = path.join(staging, spec.asset), extraction = path.join(staging, 'extract');
-    await fs.mkdir(extraction, { mode: 0o700 });
-    progress('download');
-    await downloadImpl(spec, archive);
-    // Recheck at the extraction boundary, including for injected test transports.
-    progress('archive');
-    if ((await fs.stat(archive)).size !== spec.size || await hashFile(archive, LIMITS.download) !== spec.sha256) fail('Pinned archive SHA-256 or size mismatch');
-    progress('extract');
-    await extractImpl(archive, extraction, spec);
-    const payload = path.join(extraction, spec.root);
-    progress('validate');
-    await validatePayload(payload, spec);
-    progress('publish');
-    try { await fs.rename(payload, target); }
-    catch (error) {
-      // Another process may have installed the same immutable payload first.
-      // Never delete/rewrite its directory or try a destructive rename retry.
-      if (!await exists(target)) throw error;
+    if (registrationSource) await registrationSource.validate();
+    if (!checkOnly) await assertBaseline(environment, spec.platform);
+    if (await exists(target)) {
+      if (checkOnly || reportCached) progress('validate');
+      const installed = { home: target, executable: await validatePayload(target, spec, { includePhone }) };
+      if (!checkOnly) await publishImpl(target, target, spec, { ...options, environment, existing: true });
+      if (checkOnly || reportCached) progress('ready');
+      return installed;
     }
-    // Validate at the final path, including a concurrent publisher's payload.
-    progress('validate-published');
-    const installed = { home: target, executable: await validatePayload(target, spec) };
-    progress('ready');
-    return installed;
+    if (checkOnly) fail('Pinned runtime is not cached; run stackbite setup.');
+    // An owned system-temp stage keeps downloads out of product caches. Only the
+    // verified engine below can create/publish a canonical cache installation.
+    await admitPublication(environment, spec.platform);
+    await assertBaseline(environment, spec.platform);
+    if (registrationSource) await registrationSource.validate();
+    const staging = await fs.mkdtemp(path.join(os.tmpdir(), 'stackbite-npm-'));
+    try {
+      const archive = path.join(staging, spec.asset), extraction = path.join(staging, 'extract');
+      await fs.mkdir(extraction, { mode: 0o700 });
+      progress('download');
+      await downloadImpl(spec, archive);
+      // Recheck at the extraction boundary, including for injected test transports.
+      progress('archive');
+      if ((await fs.stat(archive)).size !== spec.size || await hashFile(archive, LIMITS.download) !== spec.sha256) fail('Pinned archive SHA-256 or size mismatch');
+      progress('extract');
+      await extractImpl(archive, extraction, spec);
+      const payload = path.join(extraction, spec.root);
+      progress('validate');
+      await validatePayload(payload, spec);
+      progress('publish');
+      await admitPublication(environment, spec.platform);
+      await assertBaseline(environment, spec.platform);
+      if (registrationSource) await registrationSource.validate();
+      await publishImpl(payload, target, spec, { ...options, environment, existing: false });
+      // Validate at the final path, including a concurrent publisher's payload.
+      progress('validate-published');
+      const installed = { home: target, executable: await validatePayload(target, spec) };
+      progress('ready');
+      return installed;
+    } finally {
+      // Only this mkdtemp handle is owned by this invocation.
+      if (path.dirname(staging) !== path.resolve(os.tmpdir()) || !path.basename(staging).startsWith('stackbite-npm-')) fail('Unsafe staging cleanup path');
+      await fs.rm(staging, { recursive: true, force: true });
+    }
   } finally {
-    // Only this mkdtemp handle is owned by this invocation.
-    if (!inside(cache, staging) || path.dirname(staging) !== cache) fail('Unsafe staging cleanup path');
-    await fs.rm(staging, { recursive: true, force: true });
+    if (preparation) await settlePreparation(preparation, environment, spec.platform, registrationSource);
   }
 }
 async function launchNative(executable, argv, environment, { spawnImpl = spawn, signalSource = process } = {}) {
@@ -256,22 +527,41 @@ async function main(argv = process.argv.slice(2), options = {}) {
   const removing = ['uninstall', 'delete'].includes(argv[0]);
   const manifest = options.manifest || require('../release.json');
   const platform = options.platform || process.platform;
-  const environment = options.environment || process.env;
-  const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
-  // First install always verifies everything. Cached TUI/runtime starts defer only
-  // Phone; explicit phone/setup/removal commands retain the full pinned check.
-  const installed = await timing.phase(environment, 'launcher.ensure', () => ensureBinary(spec, { ...options,
-    cache: options.cache || cacheDirectory(environment, platform),
-    checkOnly: removing || setup?.checkOnly || false, reportCached: Boolean(setup),
-    includePhone: removing || Boolean(setup) || argv[0] === 'phone',
-    progress: options.progress || stageReporter(options.stderr || process.stderr) }));
-  if (setup) return { code: 0, signal: null };
-  timing.mark(environment, 'launcher.exec');
-  // The bundled runtime owns state discovery and migration for every entrypoint.
-  const result = await launchNative(installed.executable, argv, { ...environment,
-    STACKBITE_HOME: path.resolve(installed.home) }, options);
-  if (!removing) return result;
-  const { removeRegistration } = require('./uninstall-registration');
-  return removeRegistration(argv, result, environment, launchNative, options);
+  const environment = { ...(options.environment || process.env) };
+  // Only the package's existing descriptor producer supplies registration input.
+  // The engine validates package membership and tool/file identity before save.
+  delete environment.STACKBITE_NPM_REGISTRATION;
+  const { descriptor, explicitApply } = require('./uninstall-registration');
+  let npm = !removing ? await descriptor(options) : null;
+  const registrationSource = await pinRegistration(npm, options);
+  try {
+    if (npm) environment.STACKBITE_NPM_REGISTRATION = JSON.stringify(npm);
+    const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
+    // First install always verifies everything. Cached TUI/runtime starts defer only
+    // Phone; explicit phone/setup/removal commands retain the full pinned check.
+    let installed;
+    try { installed = await timing.phase(environment, 'launcher.ensure', () => ensureBinary(spec, { ...options,
+      environment, registrationSource,
+      cache: options.cache || cacheDirectory(environment, platform),
+      checkOnly: removing || setup?.checkOnly || false, reportCached: Boolean(setup),
+      includePhone: removing || Boolean(setup) || argv[0] === 'phone',
+      progress: options.progress || stageReporter(options.stderr || process.stderr) })); }
+    catch (error) {
+      if (!removing) throw error;
+      const { resumeWithoutRuntime, registrationOnly } = require('./uninstall-registration');
+      const recovered = await resumeWithoutRuntime(argv, environment, launchNative, options);
+      if (recovered) return recovered;
+      const registration = await registrationOnly(argv, environment, launchNative, options);
+      if (registration) return registration;
+      throw error;
+    }
+    if (setup) return { code: 0, signal: null };
+    timing.mark(environment, 'launcher.exec');
+    // The bundled runtime owns state discovery and migration for every entrypoint.
+    if (removing && explicitApply(argv)) npm = await descriptor(options);
+    return launchNative(installed.executable, argv, { ...environment,
+      ...(npm ? { STACKBITE_NPM_REGISTRATION: JSON.stringify(npm) } : {}),
+      STACKBITE_HOME: path.resolve(installed.home) }, options);
+  } finally { if (registrationSource) await registrationSource.close(); }
 }
 module.exports = { releaseSpec, validatePayload, ensureBinary, launchNative, main };

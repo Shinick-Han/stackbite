@@ -7,11 +7,13 @@ const os = require('node:os');
 const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
 const { gzipSync } = require('node:zlib');
-const { releaseSpec, ensureBinary, validatePayload, launchNative, main } = require('../lib/bootstrap');
+const { releaseSpec, ensureBinary: prepareBinary, validatePayload, launchNative, main: launch } = require('../lib/bootstrap');
 const { extractArchive, validateEntries, tarEntries } = require('../lib/archive');
 const { cacheDirectory } = require('../lib/cache');
 const VERSION = require('../../../package.json').version;
-const { fixture, digest, tar, zip } = require('./fixtures');
+const { fixture, digest, tar, zip, publishFixture } = require('./fixtures');
+const ensureBinary = (spec, options) => prepareBinary(spec, { publishImpl: publishFixture, ...options });
+const main = (argv, options) => launch(argv, { publishImpl: publishFixture, ...options });
 
 async function owned(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'stackbite-npm-owned-'));
@@ -88,7 +90,7 @@ test('per-file hash and portable product/version/commit identities are enforced'
     const bad = fixture('linux', change), badSpec = releaseSpec(bad.manifest, 'linux', 'x64');
     const cache = path.join(area, digest(Buffer.from(JSON.stringify(change))));
     await assert.rejects(ensureBinary(badSpec, { cache, downloadImpl: writeFixture(bad) }), /identity mismatch/);
-    assert.deepEqual(await fs.readdir(cache), []);
+    await assert.rejects(fs.lstat(cache), { code: 'ENOENT' });
   }
 });
 test('archive SHA-256 is checked before any extractor and staging is removed after failure', async t => {

@@ -6,7 +6,7 @@ const { fail } = require('./common');
 
 function cacheDirectory(environment = process.env, platform = process.platform, home = os.homedir()) {
   return platform === 'win32'
-    ? path.resolve(environment.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Stackbite', 'cache')
+    ? path.resolve(environment.LOCALAPPDATA || path.join(environment.USERPROFILE || home, 'AppData', 'Local'), 'Stackbite', 'cache')
     : path.resolve(environment.XDG_CACHE_HOME || path.join(environment.HOME || home, '.cache'), 'stackbite');
 }
 // Check every ancestor without creating anything, including for an absent cache.

@@ -75,4 +75,15 @@ function fixture(platform = 'linux', changes = {}, extraFiles = {}) {
   const manifest = { schema: 1, version: VERSION, commit: COMMIT, repository: 'Shinick-Han/stackbite', platforms: { [`${platform}-${platform === 'darwin' ? 'arm64' : 'x64'}`]: pinned } };
   return { bytes, pinned, manifest, root, files, image };
 }
-module.exports = { COMMIT, digest, tar, zip, fixture };
+// Validation fixtures contain inert image bytes. Replace only the engine's
+// publication subprocess at that boundary; publication.test.js runs the real
+// Python record-install producer and OS gates instead.
+async function publishFixture(payload, target, spec, { existing }) {
+  if (existing) return;
+  const fs = require('node:fs/promises'), path = require('node:path');
+  const { safeDirectory, exists } = require('../lib/common');
+  await safeDirectory(path.dirname(target));
+  try { await fs.rename(payload, target); }
+  catch (error) { if (!await exists(target)) throw error; }
+}
+module.exports = { COMMIT, digest, tar, zip, fixture, publishFixture };

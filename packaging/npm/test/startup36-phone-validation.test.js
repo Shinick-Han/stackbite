@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { EventEmitter } = require('node:events');
-const { fixture } = require('./fixtures');
+const { fixture, publishFixture } = require('./fixtures');
 const { releaseSpec, ensureBinary, validatePayload, main } = require('../lib/bootstrap');
 
 async function install(t, platform) {
@@ -19,7 +19,7 @@ async function install(t, platform) {
     'stackbite-tui': Buffer.from('mandatory TUI'),
   });
   const spec = releaseSpec(value.manifest, platform, platform === 'darwin' ? 'arm64' : 'x64', { glibcVersionRuntime: '2.28' });
-  const options = { cache, downloadImpl: (_, file) => fs.writeFile(file, value.bytes),
+  const options = { cache, publishImpl: publishFixture, downloadImpl: (_, file) => fs.writeFile(file, value.bytes),
     extractImpl: async (_, destination) => {
       for (const [name, bytes] of Object.entries(value.files)) {
         const file = path.join(destination, value.root, name);
