@@ -20,4 +20,24 @@ async function existingCacheDirectory(directory) {
   if (!info.isDirectory() || info.isSymbolicLink()) fail('Cache directory contains a link or non-directory');
   return true;
 }
-module.exports = { cacheDirectory, existingCacheDirectory };
+// Resolve the selected cache path once, including an absent suffix. Internal
+// payload paths still use the link checks and pinned hashes in bootstrap.
+async function resolveCacheDirectory(directory) {
+  directory = path.resolve(directory);
+  const missing = [];
+  let current = directory;
+  for (;;) {
+    try {
+      const resolved = await fs.realpath(current);
+      if (!(await fs.stat(resolved)).isDirectory()) fail('Cache directory contains a non-directory');
+      return path.join(resolved, ...missing.reverse());
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+module.exports = { cacheDirectory, existingCacheDirectory, resolveCacheDirectory };

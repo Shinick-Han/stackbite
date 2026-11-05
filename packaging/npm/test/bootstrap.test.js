@@ -135,7 +135,7 @@ test('ZIP actual expansion is bounded before native extraction even with dishone
   await fs.writeFile(archive, zip([{ name: value.root + '/bomb', data: Buffer.alloc(65536, 65), declaredSize: 1 }]));
   await assert.rejects(extractArchive(archive, area, value.pinned, { spawnImpl: () => assert.fail('native tar must not see an expansion attack') }), /expansion exceeds/);
 });
-test('TAR PAX path/time metadata is interpreted exactly and cache ancestors reject symlinks', async t => {
+test('TAR PAX metadata and selected cache ancestor aliases', async t => {
   const area = await owned(t), value = fixture(), archive = path.join(area, 'pax.tar');
   function pax(key, value) {
     const body = ` ${key}=${value}\n`;
@@ -151,8 +151,9 @@ test('TAR PAX path/time metadata is interpreted exactly and cache ancestors reje
   await fs.mkdir(outside);
   try { await fs.symlink(outside, link, 'dir'); }
   catch (error) { if (error.code === 'EPERM') return t.skip('Host cannot create disposable directory symlinks'); throw error; }
-  await assert.rejects(ensureBinary(releaseSpec(value.manifest, 'linux', 'x64'), { cache: path.join(link, 'cache'),
-    downloadImpl: () => assert.fail('linked cache directory must not download') }), /Cache directory/);
+  const { resolveCacheDirectory, existingCacheDirectory } = require('../lib/cache');
+  assert.equal(await resolveCacheDirectory(path.join(link, 'cache with spaces')), path.join(await fs.realpath(outside), 'cache with spaces'));
+  assert.equal(await existingCacheDirectory(await resolveCacheDirectory(path.join(link, 'missing'))), false);
   assert.deepEqual(await fs.readdir(outside), []);
 });
 test('binary cache is separate from application state on both platforms', async t => {

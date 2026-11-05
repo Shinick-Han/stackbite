@@ -147,15 +147,16 @@ test('cached check and warm launch reject same-size tampering with restored time
   assert.deepEqual(await fs.readFile(file), Buffer.alloc(before.size, 65));
 });
 
-test('check rejects linked cache ancestors and unexpected payload files', async t => {
+test('check accepts a cache junction and still rejects unexpected payload files', async t => {
   const area = await owned(t), config = options(area);
   await main(['setup'], config);
   const [name] = await fs.readdir(config.cache);
+  const link = path.join(area, 'link with spaces');
+  await fs.symlink(config.cache, link, process.platform === 'win32' ? 'junction' : 'dir');
+  await withoutWrites(() => main(['setup', '--check'], { ...config, cache: link }));
   await fs.writeFile(path.join(config.cache, name, 'extra'), 'unlisted');
   await withoutWrites(() => assert.rejects(main(['setup', '--check'], config), /disagree with pinned manifest/));
-  const link = path.join(area, 'link');
-  await fs.symlink(config.cache, link, process.platform === 'win32' ? 'junction' : 'dir');
-  await withoutWrites(() => assert.rejects(main(['setup', '--check'], { ...config, cache: path.join(link, 'nested') }), /Cache directory/));
+  await withoutWrites(() => assert.rejects(main(['setup', '--check'], { ...config, cache: link }), /disagree with pinned manifest/));
 });
 
 test('warm launches stay quiet and preserve native arguments containing setup', async t => {
@@ -189,4 +190,41 @@ test('cache defaults are local and existing platform overrides remain honored', 
   assert.equal(cacheDirectory({ LOCALAPPDATA: home }, 'win32'), path.join(home, 'Stackbite', 'cache'));
   assert.equal(cacheDirectory({ USERPROFILE: home, HOME: path.join(home, 'other') }, 'win32'),
     path.join(home, 'AppData', 'Local', 'Stackbite', 'cache'));
+});
+
+
+test('setup through selected home and cache aliases preserves managed guards', async t => {
+  const area = await owned(t), real = path.join(area, 'real home'), alias = path.join(area, 'home alias with spaces');
+  await fs.mkdir(real);
+  await fs.symlink(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const value = fixture(), config = options(area, value);
+  config.environment = { HOME: alias, USERPROFILE: alias, XDG_DATA_HOME: path.join(alias, 'data') };
+  config.cache = path.join(alias, 'cache');
+  await main(['setup'], config);
+  await main(['setup', '--check'], config);
+  const installed = await ensureBinary(releaseSpec(value.manifest, 'linux', 'x64'), config);
+  await fs.writeFile(path.join(installed.home, 'runtime', 'owned.txt'), 'tampered');
+  await assert.rejects(main(['setup', '--check'], config), /file SHA-256 mismatch/);
+  const managed = path.join(real, 'data', 'stackbite');
+  await fs.rm(managed, { recursive: true, force: true });
+  await fs.symlink(real, managed, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(main(['setup'], config), /link or non-directory/);
+});
+
+
+test('aliased home still rejects a replaced installation preparation lock', async t => {
+  const area = await owned(t), real = path.join(area, 'real home'), alias = path.join(area, 'home alias with spaces');
+  await fs.mkdir(real);
+  await fs.symlink(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const value = fixture(), config = options(area, value);
+  config.environment = { HOME: alias, USERPROFILE: alias, XDG_DATA_HOME: path.join(alias, 'data') };
+  config.cache = path.join(alias, 'cache');
+  config.downloadImpl = async (_, destination) => {
+    const lock = path.join(real, 'data', 'stackbite', '.stackbite-update', 'update.lock');
+    await fs.rename(lock, lock + '.old');
+    await fs.writeFile(lock, 'replacement');
+    await fs.writeFile(destination, value.bytes, { flag: 'wx' });
+  };
+  await assert.rejects(main(['setup'], config), /Installation changed while staging/);
+  await assert.rejects(fs.lstat(config.cache), { code: 'ENOENT' });
 });

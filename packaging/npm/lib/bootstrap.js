@@ -7,7 +7,7 @@ const { createHash } = require('node:crypto');
 const { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists } = require('./common');
 const { download } = require('./download');
 const { extractArchive } = require('./archive');
-const { cacheDirectory, existingCacheDirectory } = require('./cache');
+const { cacheDirectory, existingCacheDirectory, resolveCacheDirectory } = require('./cache');
 const { parseSetup, stageReporter } = require('./setup');
 const timing = require('./startup-timing');
 const packageVersion = require('../../../package.json').version;
@@ -209,12 +209,24 @@ function installationRoot(environment, platform) {
     ? path.resolve(environment.LOCALAPPDATA || home, 'Stackbite')
     : path.resolve(environment.XDG_DATA_HOME || path.join(environment.HOME || home, '.local', 'share'), 'stackbite');
 }
+// Resolve only user-selected directory roots. Managed descendants, including
+// the installation root and update directory, must still be real directories.
+async function selectedDirectory(directory, environment, platform) {
+  const home = environment.USERPROFILE || environment.HOME || os.homedir();
+  const data = platform === 'win32' ? environment.LOCALAPPDATA || home
+    : environment.XDG_DATA_HOME || path.join(environment.HOME || home, '.local', 'share');
+  const roots = [data, home].map(root => path.resolve(root)).sort((a, b) => b.length - a.length);
+  const selected = roots.find(root => directory === root || inside(root, directory));
+  if (!selected) return existingCacheDirectory(directory);
+  const resolved = await resolveCacheDirectory(selected);
+  return existingCacheDirectory(path.join(resolved, path.relative(selected, directory)));
+}
 // Before a runtime is available, read the SAME journal without creating any
 // product directory. The verified bundled engine repeats this under OS locks
 // and owns cache/locator publication. This read is not a JavaScript flock.
 async function admitPublication(environment, platform) {
   const root = installationRoot(environment, platform);
-  if (!await existingCacheDirectory(root)) return;
+  if (!await selectedDirectory(root, environment, platform)) return;
   const journal = path.join(root, '.stackbite-uninstall.json');
   if (!await exists(journal)) return;
   const record = JSON.parse((await readSmall(journal, 8 * 1024 * 1024)).toString('utf8').replace(/^\uFEFF/, ''));
@@ -243,7 +255,7 @@ async function locatorIncarnation(root) {
 // package can continue it. The digest binds the same request bytes until launch.
 async function acceptedRemovalWithoutCapsule(environment, platform) {
   const root = installationRoot(environment, platform);
-  if (!await existingCacheDirectory(root)) return null;
+  if (!await selectedDirectory(root, environment, platform)) return null;
   const journal = path.join(root, '.stackbite-uninstall.json');
   let info;
   try { info = await fs.lstat(journal); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -262,8 +274,9 @@ async function acceptedRemovalWithoutCapsule(environment, platform) {
     digest: createHash('sha256').update(bytes).digest('hex') };
 }
 
-async function baselinePin(file) {
-  await existingCacheDirectory(path.dirname(file));
+async function baselinePin(file, environment, platform) {
+  if (environment) await selectedDirectory(path.dirname(file), environment, platform);
+  else await existingCacheDirectory(path.dirname(file));
   let info;
   try { info = await fs.lstat(file, { bigint: true }); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -296,11 +309,11 @@ async function captureBaseline(environment, platform, cachedHome) {
   for (const selected of homes) {
     for (const name of ['portable.json', platform === 'win32' ? 'stackbite.exe' : 'stackbite', 'stackbite.py']) {
       const file = path.join(selected, name);
-      if (await baselinePin(file) !== null) paths.push(file);
+      if (await baselinePin(file, environment, platform) !== null) paths.push(file);
     }
   }
   const legacy = [];
-  for (const file of new Set(paths)) legacy.push({ path: file, identity: await baselinePin(file) });
+  for (const file of new Set(paths)) legacy.push({ path: file, identity: await baselinePin(file, environment, platform) });
   return legacy.some(pin => pin.identity !== null) ? { root, incarnation: null, legacy } : null;
 }
 
@@ -310,23 +323,23 @@ async function assertBaseline(environment, platform) {
   if (Buffer.byteLength(raw) > 16384) fail('Invalid installation baseline');
   const expected = JSON.parse(raw), root = installationRoot(environment, platform);
   if (expected.preparation !== undefined) {
-    await assertPreparationBaseline(expected, root, platform);
+    await assertPreparationBaseline(expected, root, platform, environment);
     return;
   }
   const current = await locatorInstallationId(root);
   if (expected.root !== root || expected.incarnation !== current) fail('Installation changed while staging');
-  if (current === null) await assertLegacyBaseline(expected, platform);
+  if (current === null) await assertLegacyBaseline(expected, platform, environment);
 }
 // Python-origin restrictions retain FILE_ID_INFO's full volume serial;
 // libuv reports its 32-bit component. The engine still checks the full pin.
 function libuvIdentity(platform, actual, identity) {
   return platform === 'win32' && actual && identity ? { ...identity, device: (BigInt(identity.device) & 0xffffffffn).toString() } : identity;
 }
-async function assertPreparationBaseline(expected, root, platform) {
+async function assertPreparationBaseline(expected, root, platform, environment) {
   const pin = expected.preparation, file = path.join(root, '.stackbite-update', 'update.lock');
   if (Object.keys(expected).sort().join(',') !== 'preparation,root' || expected.root !== root
       || !pin || Object.keys(pin).sort().join(',') !== 'identity,path' || pin.path !== file || !pin.identity) fail('Invalid installation preparation');
-  const actual = await baselinePin(file);
+  const actual = await baselinePin(file, environment, platform);
   if (JSON.stringify(actual) !== JSON.stringify(libuvIdentity(platform, actual, pin.identity))) fail('Installation changed while staging');
 }
 // The first present locator's incarnation; null for a legacy or absent locator.
@@ -339,10 +352,10 @@ async function locatorInstallationId(root) {
   }
   return null;
 }
-async function assertLegacyBaseline(expected, platform) {
+async function assertLegacyBaseline(expected, platform, environment) {
   if (!Array.isArray(expected.legacy) || !expected.legacy.length || expected.legacy.length > 32) fail('Invalid legacy installation baseline');
   for (const pin of expected.legacy) {
-    const actual = await baselinePin(pin.path);
+    const actual = await baselinePin(pin.path, environment, platform);
     if (JSON.stringify(actual) !== JSON.stringify(libuvIdentity(platform, actual, pin.identity))) fail('Installation changed while staging');
   }
 }
@@ -381,12 +394,12 @@ async function settlePreparation(preparation, environment, platform, source) {
     if (!preparation.created || !source || !await source.absent()
         || await captureBaseline(environment, platform, preparation.target)) return;
     for (const [directory, pin] of preparation.directories) {
-      await existingCacheDirectory(directory);
+      await selectedDirectory(directory, environment, platform);
       const current = await fs.lstat(directory, { bigint: true });
       if (current.dev !== pin.dev || current.ino !== pin.ino) return;
     }
     const { file, identity, handle } = preparation;
-    if (JSON.stringify(await baselinePin(file)) !== JSON.stringify(identity)) return;
+    if (JSON.stringify(await baselinePin(file, environment, platform)) !== JSON.stringify(identity)) return;
     const held = await handle.stat({ bigint: true });
     if (!held.isFile() || held.nlink !== 1n || held.size > 1n) return;
     const bytes = Buffer.alloc(2);
@@ -395,7 +408,7 @@ async function settlePreparation(preparation, environment, platform, source) {
     if (BigInt(bytesRead) !== held.size || bytesRead === 1 && bytes[0] !== 0x30) return;
     await fs.unlink(file);
     for (const [directory, pin] of preparation.directories) {
-      await existingCacheDirectory(directory);
+      await selectedDirectory(directory, environment, platform);
       const current = await fs.lstat(directory, { bigint: true });
       if (current.dev !== pin.dev || current.ino !== pin.ino) break;
       await fs.rmdir(directory);
@@ -441,21 +454,21 @@ async function reservePreparation(environment, platform, target, source) {
   // object identity only; the bundled engine still takes the kernel gates.
   const root = installationRoot(environment, platform), directory = path.join(root, '.stackbite-update');
   await admitPublication(environment, platform);
-  await existingCacheDirectory(directory);
+  await selectedDirectory(directory, environment, platform);
   for (let parent = root; ; parent = path.dirname(parent)) {
     if (await exists(path.join(parent, '.git'))) fail('Refusing installation preparation in a source repository');
     if (parent === path.dirname(parent)) break;
   }
   if (source) await source.validate();
   const firstCreated = await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  await existingCacheDirectory(directory);
+  await selectedDirectory(directory, environment, platform);
   const directories = await createdDirectories(firstCreated, [directory, root]);
   const file = path.join(directory, 'update.lock');
   const { handle, created } = await openPreparationFile(file);
   let preparation;
   try {
     const held = await handle.stat({ bigint: true });
-    const identity = await baselinePin(file);
+    const identity = await baselinePin(file, environment, platform);
     if (!held.isFile() || held.nlink !== 1n || JSON.stringify(identity) !== JSON.stringify({ device: held.dev.toString(), inode: held.ino.toString() })) fail('Invalid installation preparation');
     preparation = { handle, file, identity, created, directories, target };
     baseline = { root, preparation: { path: file, identity } };
@@ -496,7 +509,7 @@ async function publishCache(payload, target, spec, options) {
 async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
   checkOnly = false, reportCached = false, includePhone = false, progress = () => {},
   environment = process.env, publishImpl = publishCache, registrationSource = null, ...options } = {}) {
-  cache = path.resolve(cache);
+  cache = await resolveCacheDirectory(cache);
   environment = { ...environment };
   if (!checkOnly) {
     await admitPublication(environment, spec.platform);
