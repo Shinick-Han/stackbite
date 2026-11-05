@@ -19,7 +19,7 @@ async function install(t, platform) {
     'stackbite-tui': Buffer.from('mandatory TUI'),
   });
   const spec = releaseSpec(value.manifest, platform, platform === 'darwin' ? 'arm64' : 'x64', { glibcVersionRuntime: '2.28' });
-  const options = { cache, publishImpl: publishFixture, downloadImpl: (_, file) => fs.writeFile(file, value.bytes),
+  const options = { cache, runtime: cache, publishImpl: publishFixture, downloadImpl: (_, file) => fs.writeFile(file, value.bytes),
     extractImpl: async (_, destination) => {
       for (const [name, bytes] of Object.entries(value.files)) {
         const file = path.join(destination, value.root, name);
@@ -55,7 +55,7 @@ for (const platform of ['win32', 'linux', 'darwin']) {
     await assert.rejects(validatePayload(installed.home, spec), /disagree with pinned manifest/);
     // Install validation still covers Phone, including the published final path.
     const other = await fs.mkdtemp(path.join(options.cache, 'first-install-'));
-    await assert.rejects(ensureBinary(spec, { ...options, cache: other,
+    await assert.rejects(ensureBinary(spec, { ...options, cache: other, runtime: other,
       extractImpl: async (...args) => {
         await options.extractImpl(...args);
         await fs.writeFile(path.join(args[1], value.root, 'phone/stackbite-phone-host'), 'bad extraction');

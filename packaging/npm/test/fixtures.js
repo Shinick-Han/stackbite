@@ -79,11 +79,16 @@ function fixture(platform = 'linux', changes = {}, extraFiles = {}) {
 // publication subprocess at that boundary; publication.test.js runs the real
 // Python record-install producer and OS gates instead.
 async function publishFixture(payload, target, spec, { existing }) {
-  if (existing) return;
-  const fs = require('node:fs/promises'), path = require('node:path');
-  const { safeDirectory, exists } = require('../lib/common');
+  const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
+  const { safeDirectory, exists, inside } = require('../lib/common');
+  // Inert images may only land in a disposable area, never an installed root.
+  if (!inside(path.resolve(os.tmpdir()), path.resolve(target))) throw new Error(`fixture publication outside the temporary area: ${target}`);
+  if (existing || payload === target) return;
   await safeDirectory(path.dirname(target));
-  try { await fs.rename(payload, target); }
-  catch (error) { if (!await exists(target)) throw error; }
+  // A download stage moves; an adopted previous-layout image is copied and stays.
+  try {
+    if (path.basename(path.dirname(payload)) === 'extract') await fs.rename(payload, target);
+    else await fs.cp(payload, target, { recursive: true, errorOnExist: true, force: false });
+  } catch (error) { if (!await exists(target)) throw error; }
 }
 module.exports = { COMMIT, digest, tar, zip, fixture, publishFixture };

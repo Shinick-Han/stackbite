@@ -20,7 +20,7 @@ async function owned(t) {
   const root = path.join(area, process.platform === 'win32' ? 'local/Stackbite' : 'data/stackbite');
   const cache = process.platform === 'win32' ? path.join(root, 'cache') : path.join(area, 'cache/stackbite');
   const value = fixture(process.platform, {}, { [process.platform === 'win32' ? 'install.ps1' : 'install.sh']: Buffer.from('# inert installer') });
-  return { area, environment, root, cache, value };
+  return { area, environment, root, cache, app: path.join(root, 'app'), value };
 }
 async function accepted(c, phase = 'prepared') {
   await fs.mkdir(c.root, { recursive: true });
@@ -273,13 +273,15 @@ test('normal npm setup uses the real record-install entry and preserves ID on ca
   const locator = path.join(c.root, 'default-install.json');
   const first = JSON.parse(await fs.readFile(locator, 'utf8'));
   assert.match(first.installation_id, /^[a-f0-9]{32}$/);
-  assert.ok(first.home.startsWith(c.cache + path.sep));
+  // The runtime is durable: it lives in the versioned app root, not the cache.
+  assert.ok(first.home.startsWith(c.app + path.sep));
   assert.deepEqual(await main(['--status'], { ...options, downloadImpl: () => assert.fail('cached startup downloaded') }), { code: 0, signal: null });
   const second = JSON.parse(await fs.readFile(locator, 'utf8'));
   assert.equal(second.installation_id, first.installation_id);
   assert.equal(calls.filter(call => call.args[0] !== '--record-install').length, 1);
   assert.equal(calls.filter(call => call.args[0] === '--record-install').length, 1, 'cached normal start must not spawn another maintenance engine');
-  assert.ok((await fs.readdir(c.cache)).every(name => /^v1-[a-f0-9]{64}$/.test(name)));
+  assert.deepEqual(await fs.readdir(c.app), [path.basename(first.home)]);
+  await assert.rejects(fs.lstat(c.cache), { code: 'ENOENT' });
 });
 
 for (const localAppData of [true, false]) {
@@ -290,6 +292,7 @@ for (const localAppData of [true, false]) {
       delete c.environment.LOCALAPPDATA;
       c.root = path.join(c.environment.USERPROFILE, 'Stackbite');
       c.cache = path.join(c.environment.USERPROFILE, 'AppData/Local/Stackbite/cache');
+      c.app = path.join(c.root, 'app');
     }
     c.environment.HOME = path.join(c.area, 'foreign-home');
     await fs.mkdir(c.environment.HOME);
@@ -303,7 +306,7 @@ for (const localAppData of [true, false]) {
     assert.deepEqual(await main(['setup'], options), { code: 0, signal: null });
     const file = path.join(c.root, 'default-install.json');
     const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-    assert.equal(path.dirname(saved.home), c.cache);
+    assert.equal(path.dirname(saved.home), c.app);
     assert.match(saved.installation_id, /^[a-f0-9]{32}$/);
     await main(['--status'], { ...options, downloadImpl: () => assert.fail('warm cache downloaded') });
     assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), saved);
@@ -416,14 +419,14 @@ for (const replacement of [false, true]) {
         if (replacement) {
           await main(['setup'], initial);
           preserved.locator = await fs.readFile(file);
-          preserved.cache = await fs.readdir(c.cache);
+          preserved.app = await fs.readdir(c.app);
         }
       }, spawnImpl: actualEngine(c, calls) }), /Installation changed while staging/);
     assert.equal(calls.length, 0);
     for (const stage of stages) await assert.rejects(fs.stat(stage), { code: 'ENOENT' });
     if (replacement) {
       assert.deepEqual(await fs.readFile(file), preserved.locator);
-      assert.deepEqual(await fs.readdir(c.cache), preserved.cache);
+      assert.deepEqual(await fs.readdir(c.app), preserved.app);
     } else {
       await assert.rejects(fs.stat(file), { code: 'ENOENT' });
       await assert.rejects(fs.stat(c.cache), { code: 'ENOENT' });
@@ -456,7 +459,7 @@ test('concurrent firstever npm setup shares preparation until real kernel public
     [{ code: 0, signal: null }, { code: 0, signal: null }]);
   const saved = JSON.parse(await fs.readFile(path.join(c.root, 'default-install.json'), 'utf8'));
   assert.match(saved.installation_id, /^[a-f0-9]{32}$/);
-  assert.equal((await fs.readdir(c.cache)).length, 1);
+  assert.equal((await fs.readdir(c.app)).length, 1);
   await removeProduct(c);
   await assert.rejects(fs.stat(c.cache), { code: 'ENOENT' });
 });
@@ -550,7 +553,7 @@ for (const legacy of [false, true]) for (const replacement of [false, true]) {
           const current = JSON.parse(preserved.locator.toString('utf8'));
           preserved.sentinel = path.join(current.home, 'new-lifetime-sentinel');
           await fs.writeFile(preserved.sentinel, 'new lifetime');
-          preserved.cache = await fs.readdir(c.cache);
+          preserved.app = await fs.readdir(c.app);
         }
       }, spawnImpl: actualEngine(c, calls) }), /Installation changed while staging/);
     assert.equal(calls.length, 0);
@@ -558,7 +561,7 @@ for (const legacy of [false, true]) for (const replacement of [false, true]) {
     if (replacement) {
       assert.deepEqual(await fs.readFile(locator), preserved.locator);
       assert.equal(await fs.readFile(preserved.sentinel, 'utf8'), 'new lifetime');
-      assert.deepEqual(await fs.readdir(c.cache), preserved.cache);
+      assert.deepEqual(await fs.readdir(c.app), preserved.app);
     } else {
       await assert.rejects(fs.lstat(locator), { code: 'ENOENT' });
       await assert.rejects(fs.lstat(c.cache), { code: 'ENOENT' });

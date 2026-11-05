@@ -12,8 +12,9 @@ const { extractArchive, validateEntries, tarEntries } = require('../lib/archive'
 const { cacheDirectory } = require('../lib/cache');
 const VERSION = require('../../../package.json').version;
 const { fixture, digest, tar, zip, publishFixture } = require('./fixtures');
-const ensureBinary = (spec, options) => prepareBinary(spec, { publishImpl: publishFixture, ...options });
-const main = (argv, options) => launch(argv, { publishImpl: publishFixture, ...options });
+// Durable images land beside the owned cache, never in an installed app root.
+const ensureBinary = (spec, options) => prepareBinary(spec, { publishImpl: publishFixture, runtime: options.cache, ...options });
+const main = (argv, options) => launch(argv, { publishImpl: publishFixture, runtime: options.cache, ...options });
 
 async function owned(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'stackbite-npm-owned-'));
@@ -68,17 +69,25 @@ test('concurrent initial invocations publish one immutable cache and clean only 
   assert.deepEqual(results[0], results[1]); assert.equal(downloads, 2);
   assert.deepEqual(await fs.readdir(cache), [path.basename(results[0].home)]);
 });
-test('altered cached manifest cannot bless a changed binary, and corrupt cache is never replaced/deleted', async t => {
+test('altered image manifest cannot bless a changed binary, and an altered image is never replaced/deleted', async t => {
   const cache = await owned(t), value = fixture(), spec = releaseSpec(value.manifest, 'linux', 'x64');
+  const alter = async home => {
+    const changed = Buffer.from('\x7fELFattacker payload');
+    await fs.writeFile(path.join(home, 'stackbite'), changed);
+    const manifestPath = path.join(home, 'SHA256SUMS.json');
+    const hashes = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    hashes.stackbite = digest(changed); await fs.writeFile(manifestPath, JSON.stringify(hashes));
+    return changed;
+  };
   const result = await ensureBinary(spec, { cache, downloadImpl: writeFixture(value) });
-  const changed = Buffer.from('\x7fELFattacker payload');
-  await fs.writeFile(result.executable, changed);
-  const manifestPath = path.join(result.home, 'SHA256SUMS.json');
-  const hashes = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
-  hashes.stackbite = digest(changed); await fs.writeFile(manifestPath, JSON.stringify(hashes));
-  await assert.rejects(ensureBinary(spec, { cache, downloadImpl: () => assert.fail('corrupt cache must not trigger a download/replacement') }), /manifest or metadata SHA-256/);
+  const changed = await alter(result.home);
+  // An image this pin does not describe stays in place; the pin gets its own sibling.
+  const sibling = await ensureBinary(spec, { cache, downloadImpl: writeFixture(value) });
+  assert.equal(path.basename(sibling.home), spec.root.replace(spec.version, `${spec.version}-pin${spec.sha256.slice(0, 10)}`));
   assert.deepEqual(await fs.readFile(result.executable), changed);
-  assert.ok((await fs.stat(result.home)).isDirectory());
+  await alter(sibling.home);
+  await assert.rejects(ensureBinary(spec, { cache, downloadImpl: () => assert.fail('an altered pinned image must not be replaced') }), /manifest or metadata SHA-256/);
+  assert.ok((await fs.stat(sibling.home)).isDirectory());
 });
 test('per-file hash and portable product/version/commit identities are enforced', async t => {
   const area = await owned(t);
@@ -179,8 +188,7 @@ test('native child receives literal argv/inherited stdio, custom state, actual h
   assert.deepEqual(actual.argv, argv); assert.equal(actual.state, path.join(area, 'owned state'));
   assert.equal(actual.home, path.dirname(invocation.executable));
   assert.equal(path.basename(invocation.executable), 'stackbite');
-  assert.equal(path.basename(actual.home), `v1-${digest(Buffer.from(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])))}`);
-  assert.equal(path.basename(actual.home).length, 67);
+  assert.equal(path.basename(actual.home), spec.root);
 });
 test('state discovery stays native when the caller provides no state override', async t => {
   const area = await owned(t), value = fixture();
@@ -222,17 +230,24 @@ test('parent signals are forwarded and child signal termination/handlers are pre
   assert.equal(source.listenerCount('SIGINT'), 0); assert.equal(source.listenerCount('SIGTERM'), 0);
 });
 
-test('compact cache key keeps all identity bits and separates changes before cached reuse', async t => {
+test('release identity separates durable images; reuse still requires the full pinned validation', async t => {
   const cache = await owned(t), value = fixture(), spec = releaseSpec(value.manifest, 'linux', 'x64');
   const original = await ensureBinary(spec, { cache, downloadImpl: writeFixture(value) });
-  assert.equal(path.basename(original.home).length, 67);
-  for (const change of [{commit: 'b'.repeat(40)}, {sha256: 'c'.repeat(64)}, {version: '0.0.1'}, {key: 'win32-x64'}]) {
+  assert.equal(path.basename(original.home), spec.root);
+  for (const change of [{commit: 'b'.repeat(40)}, {version: '0.0.1'}]) {
     let downloads = 0;
     await assert.rejects(ensureBinary({...spec,...change}, {cache, downloadImpl: async () => {
       downloads++; throw new Error('distinct identity reached download');
     }}), /distinct identity reached download/);
     assert.equal(downloads, 1);
   }
+  // Another archive digest of the same release reuses the image only through its pinned members.
+  const repacked = { ...spec, sha256: 'c'.repeat(64) };
+  assert.deepEqual(await ensureBinary(repacked, { cache, downloadImpl: () => assert.fail('validated image was downloaded again') }), original);
+  // An image another pin describes is never replaced: this pin stages its own and validates it.
+  await assert.rejects(ensureBinary({ ...repacked, manifestSha256: 'd'.repeat(64) }, { cache,
+    downloadImpl: async (_, target) => fs.writeFile(target, value.bytes) }), /SHA-256/);
+  assert.deepEqual(await fs.readdir(cache), [spec.root]);
   assert.equal(await validatePayload(original.home, spec), original.executable);
 });
 test('concurrent cached validation still hashes every byte of every pinned member', async t => {

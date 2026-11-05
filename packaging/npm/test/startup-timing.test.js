@@ -35,7 +35,7 @@ async function records(file) {
 }
 function launch(area, value, environment, calls, argv = ['--rooms', 'secret-argument']) {
   return main(argv, { manifest: value.manifest, platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.35',
-    cache: path.join(area, 'cache'), downloadImpl: writeFixture(value), publishImpl: publishFixture, environment,
+    cache: path.join(area, 'cache'), runtime: path.join(area, 'runtime'), downloadImpl: writeFixture(value), publishImpl: publishFixture, environment,
     progress: () => {}, spawnImpl: inertChild(calls) });
 }
 
@@ -48,7 +48,7 @@ test('disabled or relative timing target writes nothing and launches unchanged',
     assert.deepEqual(await launch(area, value, { [timing.ENVIRONMENT]: 'relative.jsonl' }, calls), { code: 0, signal: null });
   } finally { process.chdir(cwd); }
   assert.equal(calls.length, 2);
-  assert.deepEqual((await fs.readdir(area)).sort(), ['cache']);
+  assert.deepEqual((await fs.readdir(area)).sort(), ['runtime']);
 });
 
 test('enabled timing records the full verification then the exec mark, without arguments or paths', async t => {
@@ -76,8 +76,8 @@ test('a refused tampered payload records a raised verification and never an exec
   const area = await owned(t), value = fixture(), calls = [], file = path.join(area, 'timing.jsonl');
   const environment = { [timing.ENVIRONMENT]: file };
   await launch(area, value, environment, calls);
-  const [home] = await fs.readdir(path.join(area, 'cache'));
-  await fs.writeFile(path.join(area, 'cache', home, 'runtime', 'owned.txt'), 'tampered runtime fixtur');
+  const [home] = await fs.readdir(path.join(area, 'runtime'));
+  await fs.writeFile(path.join(area, 'runtime', home, 'runtime', 'owned.txt'), 'tampered runtime fixtur');
   await assert.rejects(launch(area, value, environment, calls), /SHA-256 mismatch/);
   assert.equal(calls.length, 1);
   assert.deepEqual((await records(file)).map(item => [item.phase, item.outcome]),

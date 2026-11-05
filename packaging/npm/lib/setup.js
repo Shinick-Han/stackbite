@@ -14,7 +14,7 @@ function stageReporter(stderr) {
     archive: 'Verifying archive...',
     extract: 'Extracting runtime...',
     validate: 'Validating runtime files...',
-    publish: 'Publishing runtime cache...',
+    publish: 'Publishing runtime...',
     'validate-published': 'Validating published runtime...',
     ready: 'Pinned runtime is ready.'
   };

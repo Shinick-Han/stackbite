@@ -18,7 +18,7 @@ test('uninstall and delete never download a missing runtime', async t => {
   const sample = fixture();
   for (const command of ['uninstall', 'delete']) {
     await assert.rejects(main([command, '--all', '--apply'], { manifest: sample.manifest,
-      platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.28', cache,
+      platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.28', cache, runtime: path.join(root, 'missing-runtime'),
       downloadImpl: async () => { assert.fail('removal downloaded a runtime'); } }), /not cached/);
   }
   await assert.rejects(fs.stat(cache), { code: 'ENOENT' });

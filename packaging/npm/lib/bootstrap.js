@@ -484,8 +484,30 @@ async function reservePreparation(environment, platform, target, source) {
   }
 }
 
+// Durable runtime images share the standalone installer's versioned app root,
+// with its live-reference retention and removal inventory. The disposable
+// cache only holds images of the previous layout, which may be adopted.
+// A different archive of the same version and commit (for example a signed
+// rebuild) gets a sibling qualified by its pinned archive digest, so an image
+// another installer or pin published is never replaced or run under this pin.
+function runtimeName(spec, qualified = false) {
+  const commit = spec.commit.slice(0, 12), version = spec.version + (qualified ? `-pin${spec.sha256.slice(0, 10)}` : '');
+  return spec.platform === 'win32' ? `${version}-${commit}` : `stackbite-${version}-${spec.host}-${commit}`;
+}
+async function pinnedTarget(runtime, spec) {
+  const canonical = path.join(runtime, runtimeName(spec));
+  if (!await exists(canonical)) return canonical;
+  try { await pinnedDocuments(await payloadRoot(canonical), spec); return canonical; }
+  catch (error) { if (/manifest or metadata SHA-256 mismatch/.test(error.message)) return path.join(runtime, runtimeName(spec, true)); throw error; }
+}
+function previousCacheHome(home, cache, platform) {
+  const spelling = value => platform === 'win32' ? value.toLowerCase() : value;
+  return typeof home === 'string' && path.isAbsolute(home) && /^v1-[a-f0-9]{64}$/.test(path.basename(home))
+    && !!cache && spelling(path.dirname(path.resolve(home))) === spelling(cache);
+}
 async function publishCache(payload, target, spec, options) {
   await assertBaseline(options.environment, spec.platform);
+  let migrate = false;
   if (options.existing) {
     const root = installationRoot(options.environment, spec.platform);
     for (const name of ['default-install.json', 'install.json']) {
@@ -493,46 +515,74 @@ async function publishCache(payload, target, spec, options) {
       if (!await exists(locator)) continue;
       const saved = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
       const descriptor = options.environment.STACKBITE_NPM_REGISTRATION;
-      if (typeof saved.home === 'string' && path.isAbsolute(saved.home)
+      migrate = previousCacheHome(saved.home, options.cache, spec.platform);
+      if (!migrate && typeof saved.home === 'string' && path.isAbsolute(saved.home)
           && typeof saved.state === 'string' && path.isAbsolute(saved.state) && /^[a-f0-9]{32}$/.test(saved.installation_id)
           && (!descriptor || JSON.stringify(saved.npm_registration) === JSON.stringify(JSON.parse(descriptor)))) return;
       break;
     }
   }
   const engine = path.join(payload, 'stackbite' + (spec.platform === 'win32' ? '.exe' : ''));
-  const argv = options.existing ? ['--record-install', target]
+  // A selection still in the previous cache layout moves to the durable image.
+  const argv = options.existing && !migrate ? ['--record-install', target]
     : ['--record-install', target, '-', payload, 'cache'];
   const result = await launchNative(engine, argv, { ...options.environment, STACKBITE_HOME: payload }, options);
   if (result.code !== 0 || result.signal) fail('Runtime publication was refused');
 }
 
-async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = download, extractImpl = extractArchive,
+function runtimeDirectory(environment, platform) {
+  return path.join(installationRoot(environment, platform), 'app');
+}
+// The previous layout's image of this exact pinned identity, when it still
+// passes the full pinned validation. It is only read; a live process may use it.
+async function previousImage(legacy, cache, spec) {
+  if (!await existingCacheDirectory(cache) || !await exists(legacy)) return null;
+  try { await validatePayload(legacy, spec); } catch { return null; }
+  return legacy;
+}
+async function ensureBinary(spec, { cache = cacheDirectory(), runtime = null, downloadImpl = download, extractImpl = extractArchive,
   checkOnly = false, reportCached = false, includePhone = false, progress = () => {},
   environment = process.env, publishImpl = publishCache, registrationSource = null, ...options } = {}) {
   cache = await resolveCacheDirectory(cache);
   environment = { ...environment };
+  runtime = path.resolve(runtime || runtimeDirectory(environment, spec.platform));
   if (!checkOnly) {
     await admitPublication(environment, spec.platform);
     await existingCacheDirectory(cache); // Validate existing ancestors without creating a cache.
   }
-  if (checkOnly) {
-    if (!await existingCacheDirectory(cache)) throw notCached();
-  }
   // Full identity remains SHA-256 addressed while avoiding Windows MAX_PATH.
   const cacheKey = createHash('sha256').update(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])).digest('hex');
-  const target = path.join(cache, `v1-${cacheKey}`);
+  const legacy = path.join(cache, `v1-${cacheKey}`);
+  const target = await selectedDirectory(runtime, environment, spec.platform) ? await pinnedTarget(runtime, spec)
+    : path.join(runtime, runtimeName(spec));
   const preparation = !checkOnly ? await reservePreparation(environment, spec.platform, target, registrationSource) : null;
   try {
     if (registrationSource) await registrationSource.validate();
     if (!checkOnly) await assertBaseline(environment, spec.platform);
-    if (await exists(target)) {
+    // Check-only callers (removal, setup --check) never publish; they may still
+    // use an image of the previous cache layout.
+    const home = await selectedDirectory(runtime, environment, spec.platform) && await exists(target) ? target
+      : checkOnly && await existingCacheDirectory(cache) && await exists(legacy) ? legacy : null;
+    if (home) {
       if (checkOnly || reportCached) progress('validate');
-      const installed = { home: target, executable: await validatePayload(target, spec, { includePhone }) };
-      if (!checkOnly) await publishImpl(target, target, spec, { ...options, environment, existing: true });
+      const installed = { home, executable: await validatePayload(home, spec, { includePhone }) };
+      if (!checkOnly) await publishImpl(target, target, spec, { ...options, environment, cache, existing: true });
       if (checkOnly || reportCached) progress('ready');
       return installed;
     }
     if (checkOnly) throw notCached();
+    const previous = await previousImage(legacy, cache, spec);
+    if (previous) {
+      progress('publish');
+      await admitPublication(environment, spec.platform);
+      await assertBaseline(environment, spec.platform);
+      if (registrationSource) await registrationSource.validate();
+      await publishImpl(previous, target, spec, { ...options, environment, cache, existing: false });
+      progress('validate-published');
+      const installed = { home: target, executable: await validatePayload(target, spec) };
+      progress('ready');
+      return installed;
+    }
     // An owned system-temp stage keeps downloads out of product caches. Only the
     // verified engine below can create/publish a canonical cache installation.
     await admitPublication(environment, spec.platform);
@@ -545,7 +595,7 @@ async function ensureBinary(spec, { cache = cacheDirectory(), downloadImpl = dow
       await admitPublication(environment, spec.platform);
       await assertBaseline(environment, spec.platform);
       if (registrationSource) await registrationSource.validate();
-      await publishImpl(payload, target, spec, { ...options, environment, existing: false });
+      await publishImpl(payload, target, spec, { ...options, environment, cache, existing: false });
       // Validate at the final path, including a concurrent publisher's payload.
       progress('validate-published');
       const installed = { home: target, executable: await validatePayload(target, spec) };
@@ -630,6 +680,21 @@ async function launchNative(executable, argv, environment, { spawnImpl = spawn, 
     child.once('exit', (code, signal) => { cleanup(); resolve({ code, signal }); });
   });
 }
+// Before the first install, --help/--version answer from this package's pin
+// instead of downloading a runtime; the launcher only ever runs that build.
+async function coldAnswer(argv, spec, runtime, { stdout = process.stdout, stderr = process.stderr }) {
+  if (argv.length !== 1 || !['--version', '--help', '-h'].includes(argv[0])) return null;
+  try { if (await exists(await pinnedTarget(runtime, spec))) return null; } catch { return null; }
+  if (argv[0] === '--version') {
+    stdout.write(`Stackbite ${spec.version} (${spec.commit})\n`);
+    stderr.write('Stackbite: this is the pinned release; its runtime is not installed yet. Run stackbite setup to install it.\n');
+  } else {
+    stdout.write('usage: stackbite [--help | --version] | stackbite setup [--check] | stackbite [COMMAND ...]\n\n'
+      + `The pinned Stackbite ${spec.version} runtime is not installed yet. Run stackbite setup to\n`
+      + 'install it (or run any command); stackbite --help then shows the full reference.\n');
+  }
+  return { code: 0, signal: null };
+}
 async function main(argv = process.argv.slice(2), options = {}) {
   const setup = parseSetup(argv);
   const removing = ['uninstall', 'delete'].includes(argv[0]);
@@ -645,6 +710,8 @@ async function main(argv = process.argv.slice(2), options = {}) {
   try {
     if (npm) environment.STACKBITE_NPM_REGISTRATION = JSON.stringify(npm);
     const spec = releaseSpec(manifest, platform, options.arch || process.arch, options);
+    const cold = await coldAnswer(argv, spec, options.runtime || runtimeDirectory(environment, platform), options);
+    if (cold) return cold;
     // First install always verifies everything. Cached TUI/runtime starts defer only
     // Phone; explicit phone/setup/removal commands retain the full pinned check.
     let installed;

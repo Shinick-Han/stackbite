@@ -55,8 +55,7 @@ for (const platform of ['win32','linux','darwin']) {
 
 test('Windows npm final spawn uses the exact frozen engine once and preserves argv and exit status',async t=>{
   const p=await payload(t,'win32','native'), cache=path.join(p.root,'cache');
-  const key=digest(Buffer.from(JSON.stringify([p.spec.version,p.spec.commit,p.spec.key,p.spec.sha256])));
-  const home=path.join(cache,'v1-'+key);
+  const home=path.join(p.root,'local','Stackbite','app',p.spec.version+'-'+p.spec.commit.slice(0,12));
   await fs.mkdir(home,{recursive:true});
   for (const name of Object.keys(p.value.files)) {
     const target=path.join(home,name); await fs.mkdir(path.dirname(target),{recursive:true});

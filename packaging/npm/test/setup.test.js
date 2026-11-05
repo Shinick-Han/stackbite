@@ -21,7 +21,7 @@ async function owned(t) {
 function options(area, value = fixture()) {
   const output = [];
   return { manifest: value.manifest, platform: 'linux', arch: 'x64', glibcVersionRuntime: '2.35', publishImpl: publishFixture,
-    cache: path.join(area, 'cache'), environment: { STACKBITE_STATE_DIR: path.join(area, 'state'), TOKEN: 'secret-fixture' },
+    cache: path.join(area, 'cache'), runtime: path.join(area, 'runtime'), environment: { STACKBITE_STATE_DIR: path.join(area, 'state'), TOKEN: 'secret-fixture' },
     stderr: { write: text => output.push(text) }, output,
     downloadImpl: (_, destination) => fs.writeFile(destination, value.bytes, { flag: 'wx' }),
     spawnImpl: () => assert.fail('setup must not start an app/backend') };
@@ -50,12 +50,12 @@ test('cold setup prepares the pinned runtime, reports safe stages, and never sta
   assert.deepEqual(config.output, [
     'Stackbite: Downloading pinned runtime...\n', 'Stackbite: Verifying archive...\n',
     'Stackbite: Extracting runtime...\n', 'Stackbite: Validating runtime files...\n',
-    'Stackbite: Publishing runtime cache...\n', 'Stackbite: Validating published runtime...\n',
+    'Stackbite: Publishing runtime...\n', 'Stackbite: Validating published runtime...\n',
     'Stackbite: Pinned runtime is ready.\n'
   ]);
   assert.doesNotMatch(config.output.join(''), /https?:|secret-fixture|TOKEN|STATE_DIR/);
-  assert.deepEqual(await fs.readdir(area), ['cache']);
-  assert.equal((await fs.readdir(config.cache)).length, 1);
+  assert.deepEqual(await fs.readdir(area), ['runtime']);
+  assert.equal((await fs.readdir(config.runtime)).length, 1);
 });
 
 test('setup with a fake streamed HTTPS/CDN download never prints credential URLs', async t => {
@@ -115,19 +115,19 @@ test('failed setup cleans its staging, publishes nothing and can be retried', as
   await assert.rejects(main(['setup'], { ...config, downloadImpl: async (_, destination) => {
     await fs.writeFile(destination, 'partial fixture'); throw new Error('owned download interrupted');
   } }), /interrupted/);
-  await assert.rejects(fs.lstat(config.cache), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(config.runtime), { code: 'ENOENT' });
   assert.doesNotMatch(config.output.join(''), /ready/);
   await main(['setup'], config);
-  assert.equal((await fs.readdir(config.cache)).length, 1);
+  assert.equal((await fs.readdir(config.runtime)).length, 1);
 });
 
-test('concurrent setups publish one validated cache and leave unrelated staging intact', async t => {
+test('concurrent setups publish one validated runtime and leave unrelated staging intact', async t => {
   const area = await owned(t), config = options(area);
-  await fs.mkdir(config.cache);
-  const unrelated = path.join(config.cache, '.staging-not-owned');
+  await fs.mkdir(config.runtime);
+  const unrelated = path.join(config.runtime, '.install-not-owned');
   await fs.mkdir(unrelated); await fs.writeFile(path.join(unrelated, 'receipt'), 'keep');
   await Promise.all([main(['setup'], config), main(['setup'], config)]);
-  assert.equal((await fs.readdir(config.cache)).length, 2);
+  assert.equal((await fs.readdir(config.runtime)).length, 2);
   assert.equal(await fs.readFile(path.join(unrelated, 'receipt'), 'utf8'), 'keep');
   await main(['setup', '--check'], config);
 });
@@ -147,16 +147,19 @@ test('cached check and warm launch reject same-size tampering with restored time
   assert.deepEqual(await fs.readFile(file), Buffer.alloc(before.size, 65));
 });
 
-test('check accepts a cache junction and still rejects unexpected payload files', async t => {
+test('check accepts a cache junction, refuses a linked durable runtime, and rejects unexpected payload files', async t => {
   const area = await owned(t), config = options(area);
   await main(['setup'], config);
-  const [name] = await fs.readdir(config.cache);
-  const link = path.join(area, 'link with spaces');
-  await fs.symlink(config.cache, link, process.platform === 'win32' ? 'junction' : 'dir');
-  await withoutWrites(() => main(['setup', '--check'], { ...config, cache: link }));
-  await fs.writeFile(path.join(config.cache, name, 'extra'), 'unlisted');
+  const [name] = await fs.readdir(config.runtime);
+  const kind = process.platform === 'win32' ? 'junction' : 'dir';
+  const cache = path.join(area, 'cache link with spaces'), runtime = path.join(area, 'runtime link with spaces');
+  await fs.mkdir(config.cache); await fs.symlink(config.cache, cache, kind); await fs.symlink(config.runtime, runtime, kind);
+  await withoutWrites(() => main(['setup', '--check'], { ...config, cache }));
+  // The durable app root keeps the installation's no-link policy.
+  await withoutWrites(() => assert.rejects(main(['setup', '--check'], { ...config, runtime }), /link or non-directory/));
+  await fs.writeFile(path.join(config.runtime, name, 'extra'), 'unlisted');
   await withoutWrites(() => assert.rejects(main(['setup', '--check'], config), /disagree with pinned manifest/));
-  await withoutWrites(() => assert.rejects(main(['setup', '--check'], { ...config, cache: link }), /disagree with pinned manifest/));
+  await withoutWrites(() => assert.rejects(main(['setup', '--check'], { ...config, cache }), /disagree with pinned manifest/));
 });
 
 test('warm launches stay quiet and preserve native arguments containing setup', async t => {
