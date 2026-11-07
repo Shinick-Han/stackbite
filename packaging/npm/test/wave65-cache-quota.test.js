@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { main, releaseSpec } = require('../lib/bootstrap');
 const { fixture } = require('./fixtures');
+const pythonOracle = require('./python-oracle');
 
 async function owned(t) {
   const area = await fs.mkdtemp(path.join(os.tmpdir(), 'sb65-'));
@@ -25,7 +26,7 @@ async function owned(t) {
   await new Promise((resolve, reject) => {
     const child = spawn(process.env.STACKBITE_TEST_PYTHON || (process.platform === 'win32' ? 'python' : 'python3'),
       ['-B', '-c', 'import os; from private_pty.private_state import ensure_directory; ensure_directory(os.environ["STACKBITE_STATE_DIR"])'],
-      { cwd: path.resolve(__dirname, '../../..'), env: environment, stdio: ['ignore', 'ignore', 'pipe'] });
+      { cwd: pythonOracle.root(), env: environment, stdio: ['ignore', 'ignore', 'pipe'] });
     let diagnostic = '';
     child.stderr.on('data', bytes => { diagnostic += bytes; });
     child.once('error', reject);
@@ -40,7 +41,7 @@ async function owned(t) {
 }
 
 function sourceEngine(c, calls, diagnostics, inject = '') {
-  const entry = path.resolve(__dirname, '../../../stackbite.py');
+  const entry = path.join(pythonOracle.root(), 'stackbite.py');
   const program = `import os,runpy,shutil,sys\n${inject}\nsys.argv=[sys.argv[1],*sys.argv[2:]]\nrunpy.run_path(sys.argv[0],run_name='__main__')`;
   return (engine, args, config) => {
     calls.push({ engine, args });

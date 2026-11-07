@@ -20,6 +20,7 @@ common.hashFile = (file, ...rest) => { hashed.push(file); return originalHash(fi
 const { main, releaseSpec, ensureBinary } = require('../lib/bootstrap');
 const { download } = require('../lib/download');
 const { fixture, publishFixture } = require('./fixtures');
+const pythonOracle = require('./python-oracle');
 
 const platform = process.platform;
 const ID = 'c'.repeat(32);
@@ -232,7 +233,7 @@ test('npm registration refresh still works through the selected image without mo
     if (['SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATH', 'PATHEXT'].includes(key.toUpperCase())) c.environment[key] = value;
   }
   c.environment.PYTHONDONTWRITEBYTECODE = '1';
-  const source = path.resolve(__dirname, '../../..');
+  const source = pythonOracle.root();
   const run = (args, env) => new Promise((resolve, reject) => {
     const child = spawn(python, ['-B', ...args], { cwd: source, env, stdio: ['ignore', 'ignore', 'pipe'] });
     let diagnostic = '';
@@ -374,10 +375,9 @@ for (const [target, arch, runtime] of MATRIX) {
 
 // The real Python publisher (publish_runtime_cache/record_install) with inert payloads.
 const python = process.env.STACKBITE_TEST_PYTHON || (platform === 'win32' ? 'python' : 'python3');
-const sourceRoot = path.resolve(__dirname, '../../..');
 function runPython(args, env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(python, ['-B', ...args], { cwd: sourceRoot, env, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(python, ['-B', ...args], { cwd: pythonOracle.root(), env, stdio: ['ignore', 'ignore', 'pipe'] });
     let diagnostic = '';
     child.stderr.on('data', bytes => { diagnostic += bytes; });
     child.once('error', reject);
@@ -398,7 +398,7 @@ function pythonEngine(counter) {
   return (executable, argv, config) => {
     if (argv[0] !== '--record-install') return engine(counter)(executable, argv, config);
     counter.maintenance.push({ executable, argv });
-    return spawn(python, ['-B', 'stackbite.py', ...argv], { ...config, cwd: sourceRoot, stdio: ['ignore', 'ignore', 'inherit'] });
+    return spawn(python, ['-B', 'stackbite.py', ...argv], { ...config, cwd: pythonOracle.root(), stdio: ['ignore', 'ignore', 'inherit'] });
   };
 }
 const installer = { [platform === 'win32' ? 'install.ps1' : 'install.sh']: Buffer.from('# inert installer') };

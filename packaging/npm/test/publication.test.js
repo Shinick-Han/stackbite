@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { main, ensureBinary, releaseSpec, launchNative } = require('../lib/bootstrap');
 const { fixture } = require('./fixtures');
+const pythonOracle = require('./python-oracle');
 
 async function owned(t) {
   const area = await fs.mkdtemp(path.join(os.tmpdir(), 'a4n-'));
@@ -45,7 +46,7 @@ function actualEngine(c, calls, before = async () => {}) {
     child.kill = () => false;
     before().then(() => {
       const processChild = spawn(process.env.STACKBITE_TEST_PYTHON || (process.platform === 'win32' ? 'python' : 'python3'),
-        ['-B', path.resolve(__dirname, '../../../stackbite.py'), ...args], config);
+        ['-B', path.join(pythonOracle.root(), 'stackbite.py'), ...args], config);
       child.kill = signal => processChild.kill(signal);
       processChild.once('exit', (...values) => child.emit('exit', ...values));
       processChild.once('error', error => child.emit('error', error));
@@ -99,7 +100,7 @@ async function touchKernelGate(c) {
   const program = 'import os,sys\nfrom private_pty.self_update import _update_lock\nwith _update_lock(sys.argv[1]): pass\n';
   await new Promise((resolve, reject) => {
     const child = spawn(process.env.STACKBITE_TEST_PYTHON || (process.platform === 'win32' ? 'python' : 'python3'),
-      ['-B', '-c', program, c.root], { cwd: path.resolve(__dirname, '../../..'), env: c.environment, stdio: ['ignore', 'pipe', 'pipe'] });
+      ['-B', '-c', program, c.root], { cwd: pythonOracle.root(), env: c.environment, stdio: ['ignore', 'pipe', 'pipe'] });
     let diagnostic = '';
     child.stderr.on('data', bytes => { diagnostic += bytes; });
     child.once('error', reject);
@@ -197,7 +198,7 @@ for (const change of ['lock-byte', 'foreign-bytes', 'replacement-lock', 'replace
 }
 
 async function removeProduct(c) {
-  const root = path.resolve(__dirname, '../../..');
+  const root = pythonOracle.root();
   const program = `import os,sys;sys.path.insert(0,${JSON.stringify(root)});`
     + 'from pathlib import Path;from private_pty import uninstall as u;from private_pty.uninstall_finalize import finalize;'
     + 'state=Path(os.environ["STACKBITE_STATE_DIR"]);journal=u.locations.install_root()/u.JOURNAL;'

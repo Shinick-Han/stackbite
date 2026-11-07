@@ -1,35 +1,35 @@
 {
   "schema": 1,
-  "version": "0.5.108",
-  "commit": "bcd3e47ee369cdbf209688fb8333b7b582e292cb",
+  "version": "0.5.109",
+  "commit": "6239b4525c8addd92996c32d14fe4ff987f2106c",
   "repository": "Shinick-Han/stackbite",
   "platforms": {
     "win32-x64": {
-      "asset": "stackbite-0.5.108-windows-x64-bcd3e47ee369.zip",
-      "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.108/stackbite-0.5.108-windows-x64-bcd3e47ee369.zip",
-      "sha256": "416b55e30a6b3670b74477e078515b927ffa61f01d1aadb255a41a30d5145c7a",
-      "size": 82803119,
-      "root": "stackbite-0.5.108-windows-x64-bcd3e47ee369",
-      "manifestSha256": "8d00d3cbe4ddb913c06392427be2e0b6a8162d88fdb3bcb2fa573fb55a95d34c",
-      "metadataSha256": "4fdcdaeeab139ac774f67c61c27bb32ba07a3151df059f7918cd042f6b89a72e"
+      "asset": "stackbite-0.5.109-windows-x64-6239b4525c8a.zip",
+      "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.109/stackbite-0.5.109-windows-x64-6239b4525c8a.zip",
+      "sha256": "bf854cc3c0ea1c571bf030ee4dcdd3280ebf7fc51842566ae7c84806fb4a2648",
+      "size": 75620079,
+      "root": "stackbite-0.5.109-windows-x64-6239b4525c8a",
+      "manifestSha256": "86d1b0083e8bb24c6d7807323c6dd0367f218df3f2f70b6865853e87498ef0f1",
+      "metadataSha256": "729775b4b8f527380f07dca18134bb0337e40630b654d7343b474bc7a351590d"
     },
     "linux-x64": {
-      "asset": "stackbite-0.5.108-linux-x86_64-bcd3e47ee369.tar.gz",
-      "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.108/stackbite-0.5.108-linux-x86_64-bcd3e47ee369.tar.gz",
-      "sha256": "83fba4c60508d2a4fcbaa276c51e8eb7db9f2f762e2f28228b9b6ece9ac10327",
-      "size": 82791962,
-      "root": "stackbite-0.5.108-linux-x86_64-bcd3e47ee369",
-      "manifestSha256": "36dfdbf9f1fc5dcdc882e438ff855065d3456f6674dea115fd219b6e7a7893fb",
-      "metadataSha256": "ee20086e1c78590a83dab038dce86e0b28d288fc6d0665f00c041644777340ad"
+      "asset": "stackbite-0.5.109-linux-x86_64-6239b4525c8a.tar.gz",
+      "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.109/stackbite-0.5.109-linux-x86_64-6239b4525c8a.tar.gz",
+      "sha256": "c158d9682780799d411de03d669d95f040f1b7eedf243fb2322bf12ebb58eaed",
+      "size": 76560731,
+      "root": "stackbite-0.5.109-linux-x86_64-6239b4525c8a",
+      "manifestSha256": "ceda4e9e9375668273bc06bd8655c5a121ff7e8a8839ed6dab5ac00a0135f6b0",
+      "metadataSha256": "ecc12703927e7b16584fc5ef72bd0ba73f8504bacbcd1dc9750517f58578aab1"
     },
     "darwin-arm64": {
-      "asset": "stackbite-0.5.108-macos-arm64-bcd3e47ee369.tar.gz",
-      "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.108/stackbite-0.5.108-macos-arm64-bcd3e47ee369.tar.gz",
-      "sha256": "3d1afcb0b7c197cf76691bff3807f8b11bfecda2c93e70f67a7b44c71f312299",
-      "size": 38100942,
-      "root": "stackbite-0.5.108-macos-arm64-bcd3e47ee369",
-      "manifestSha256": "0e1c7f4958fe4852d2e25732e18ef85523fe2a2047647362837cacf8243bed45",
-      "metadataSha256": "cac6ffae5862aa0cb5f3b51c62c798c042ae0bcc3ed06172d1f74632c77848e1"
+      "asset": "stackbite-0.5.109-macos-arm64-6239b4525c8a.tar.gz",
+      "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.109/stackbite-0.5.109-macos-arm64-6239b4525c8a.tar.gz",
+      "sha256": "c072020d6f1571cbe6fe2edc9dbc91bbd1e16559629d6cacfa4922a892039932",
+      "size": 58348881,
+      "root": "stackbite-0.5.109-macos-arm64-6239b4525c8a",
+      "manifestSha256": "499e31056ff33004a101f5ea0b8d113b276e33c82520c4fbbcc50108d0af652c",
+      "metadataSha256": "ca1457292980aa202810185af7635321b9d35712e954ad29128990312affa474"
     }
   }
 }
