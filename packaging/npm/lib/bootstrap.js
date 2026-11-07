@@ -505,6 +505,46 @@ function previousCacheHome(home, cache, platform) {
   return typeof home === 'string' && path.isAbsolute(home) && /^v1-[a-f0-9]{64}$/.test(path.basename(home))
     && !!cache && spelling(path.dirname(path.resolve(home))) === spelling(cache);
 }
+// Bounded portable.json of an image; null when absent, linked, oversized or malformed.
+async function portableMetadata(root) {
+  try { return JSON.parse((await readSmall(path.join(root, 'portable.json'), 16384)).toString('utf8')); }
+  catch { return null; }
+}
+// The release identity Python's former-cache check compares (Windows may omit platform).
+function portableMatches(value, spec) {
+  return !!value && typeof value === 'object' && value.product === 'Stackbite' && value.command === 'stackbite'
+    && value.version === spec.version && value.commit === spec.commit
+    && (Object.hasOwn(value, 'platform') ? value.platform : spec.platform === 'win32' ? spec.host : undefined) === spec.host;
+}
+// An absolute literal path with no linked ancestor and no source repository.
+async function literalPath(home) {
+  if (!path.isAbsolute(home) || path.resolve(home) !== home) return false;
+  for (let ancestor = home; ; ancestor = path.dirname(ancestor)) {
+    let info = null;
+    try { info = await fs.lstat(ancestor); } catch (error) { if (error.code !== 'ENOENT') return false; }
+    if (info?.isSymbolicLink() || info && await exists(path.join(ancestor, '.git'))) return false;
+    if (ancestor === path.dirname(ancestor)) return true;
+  }
+}
+// A previous-layout cache image recorded by a host with another cache root:
+// the shape and portable identity Python's _former_cache_image accepts. This
+// classifies the file only; no environment state changes it. It is only read.
+async function formerCache(home, spec) {
+  if (typeof home !== 'string' || !/^v1-[a-f0-9]{64}$/.test(path.basename(home))
+      || path.basename(path.dirname(home)) !== 'stackbite') return null;
+  try {
+    if (!await literalPath(home) || !(await fs.lstat(home)).isDirectory()) return null;
+  } catch { return null; }
+  return portableMatches(await portableMetadata(home), spec) ? home : null;
+}
+// A former cache selection this run may migrate: the engine moves a selection
+// only under its own state, so a per-run STACKBITE_STATE_DIR never does. The
+// engine reads a legacy HELM_STATE_DIR only when STACKBITE_STATE_DIR is absent
+// (even empty, the canonical name wins). It decides again under its locks.
+async function formerSelection(saved, environment, spec) {
+  const state = Object.hasOwn(environment, 'STACKBITE_STATE_DIR') ? environment.STACKBITE_STATE_DIR : environment.HELM_STATE_DIR;
+  return state && path.resolve(state) !== saved?.state ? null : formerCache(saved?.home, spec);
+}
 async function publishCache(payload, target, spec, options) {
   await assertBaseline(options.environment, spec.platform);
   let migrate = false;
@@ -515,7 +555,8 @@ async function publishCache(payload, target, spec, options) {
       if (!await exists(locator)) continue;
       const saved = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
       const descriptor = options.environment.STACKBITE_NPM_REGISTRATION;
-      migrate = previousCacheHome(saved.home, options.cache, spec.platform);
+      migrate = previousCacheHome(saved.home, options.cache, spec.platform)
+        || !!await formerSelection(saved, options.environment, spec);
       if (!migrate && typeof saved.home === 'string' && path.isAbsolute(saved.home)
           && typeof saved.state === 'string' && path.isAbsolute(saved.state) && /^[a-f0-9]{32}$/.test(saved.installation_id)
           && (!descriptor || JSON.stringify(saved.npm_registration) === JSON.stringify(JSON.parse(descriptor)))) return;
@@ -533,15 +574,73 @@ async function publishCache(payload, target, spec, options) {
 function runtimeDirectory(environment, platform) {
   return path.join(installationRoot(environment, platform), 'app');
 }
-// The previous layout's image of this exact pinned identity, when it still
-// passes the full pinned validation. It is only read; a live process may use it.
+// This root's first locator, when it fully names an installation: the same
+// shape publishCache keeps without rewriting its home.
+async function establishedLocator(root) {
+  for (const name of ['default-install.json', 'install.json']) {
+    const locator = path.join(root, name);
+    if (!await exists(locator)) continue;
+    const saved = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
+    return saved && typeof saved.home === 'string' && path.isAbsolute(saved.home)
+      && typeof saved.state === 'string' && path.isAbsolute(saved.state)
+      && /^[a-f0-9]{32}$/.test(saved.installation_id) ? saved : null;
+  }
+  return null;
+}
+async function installationLocator(environment, platform) {
+  const root = installationRoot(environment, platform);
+  return await selectedDirectory(root, environment, platform) ? establishedLocator(root) : null;
+}
+// The image root when its portable identity is this release; null otherwise.
+async function sameRelease(home, spec) {
+  let root;
+  try { root = await payloadRoot(home); } catch { return null; }
+  return portableMatches(await portableMetadata(root), spec) ? root : null;
+}
+// Another archive of this release (a re-signed build) carries its own valid
+// checksum manifest that pins its portable.json. A damaged image does not.
+async function anotherPin(root) {
+  try {
+    const hashes = JSON.parse((await readSmall(path.join(root, 'SHA256SUMS.json'))).toString('utf8'));
+    expectedMembers(hashes);
+    const metadata = await readSmall(path.join(root, 'portable.json'), 16384);
+    return hashes['portable.json'] === createHash('sha256').update(metadata).digest('hex');
+  } catch { return false; }
+}
+// An image the established installation already selects outside app/: an
+// explicit STACKBITE_HOME, else the locator's home. Another release or pin is
+// skipped; an image of this release must otherwise carry this package's pinned
+// documents, and the caller then validates its whole payload, so a damaged image
+// of this release is refused, not replaced. Publication keeps the locator's
+// home, except that a cache image (this host's or a former host's) is never run
+// in place.
+async function selectedImage(environment, spec, cache) {
+  const saved = await installationLocator(environment, spec.platform);
+  // A previous-cache selection keeps its existing migration path.
+  if (!saved || previousCacheHome(saved.home, cache, spec.platform)) return null;
+  const former = await formerCache(saved.home, spec);
+  for (const home of [environment.STACKBITE_HOME, saved.home]) {
+    if (typeof home !== 'string' || !path.isAbsolute(home) || home === former) continue;
+    const root = await sameRelease(home, spec);
+    if (!root) continue;
+    try { await pinnedDocuments(root, spec); }
+    catch (error) { if (await anotherPin(root)) continue; throw error; }
+    return path.resolve(home);
+  }
+  return null;
+}
+// An image of this exact pinned identity, when it passes the full pinned
+// validation. It is only read; a live process may use it.
+async function verifiedImage(home, spec) {
+  if (!home) return null;
+  try { await validatePayload(home, spec); } catch { return null; }
+  return home;
+}
 async function previousImage(legacy, cache, spec) {
-  if (!await existingCacheDirectory(cache) || !await exists(legacy)) return null;
-  try { await validatePayload(legacy, spec); } catch { return null; }
-  return legacy;
+  return await existingCacheDirectory(cache) && await exists(legacy) ? verifiedImage(legacy, spec) : null;
 }
 async function ensureBinary(spec, { cache = cacheDirectory(), runtime = null, downloadImpl = download, extractImpl = extractArchive,
-  checkOnly = false, reportCached = false, includePhone = false, progress = () => {},
+  checkOnly = false, reportCached = false, includePhone = false, reuseSelected = false, progress = () => {},
   environment = process.env, publishImpl = publishCache, registrationSource = null, ...options } = {}) {
   cache = await resolveCacheDirectory(cache);
   environment = { ...environment };
@@ -560,18 +659,25 @@ async function ensureBinary(spec, { cache = cacheDirectory(), runtime = null, do
     if (registrationSource) await registrationSource.validate();
     if (!checkOnly) await assertBaseline(environment, spec.platform);
     // Check-only callers (removal, setup --check) never publish; they may still
-    // use an image of the previous cache layout.
-    const home = await selectedDirectory(runtime, environment, spec.platform) && await exists(target) ? target
-      : checkOnly && await existingCacheDirectory(cache) && await exists(legacy) ? legacy : null;
+    // use an image of the previous cache layout, this host's or a former host's.
+    const published = await selectedDirectory(runtime, environment, spec.platform) && await exists(target);
+    const former = !published && reuseSelected
+      ? await formerCache((await installationLocator(environment, spec.platform))?.home, spec) : null;
+    const home = published ? target
+      : reuseSelected && await selectedImage(environment, spec, cache)
+        || (checkOnly ? (await existingCacheDirectory(cache) && await exists(legacy) ? legacy : former) : null);
     if (home) {
       if (checkOnly || reportCached) progress('validate');
       const installed = { home, executable: await validatePayload(home, spec, { includePhone }) };
-      if (!checkOnly) await publishImpl(target, target, spec, { ...options, environment, cache, existing: true });
+      // A selected image outside app/ is its own maintenance engine.
+      if (!checkOnly) await publishImpl(home, target, spec, { ...options, environment, cache, existing: true });
       if (checkOnly || reportCached) progress('ready');
       return installed;
     }
     if (checkOnly) throw notCached();
-    const previous = await previousImage(legacy, cache, spec);
+    // A verified previous-layout image is copied once into the durable target;
+    // the engine then moves a cache selection there.
+    const previous = await previousImage(legacy, cache, spec) || await verifiedImage(former, spec);
     if (previous) {
       progress('publish');
       await admitPublication(environment, spec.platform);
@@ -615,9 +721,11 @@ async function stageRelease(spec, staging, { downloadImpl, extractImpl, progress
   await fs.mkdir(extraction, { mode: 0o700 });
   progress('download');
   await downloadImpl(spec, archive);
-  // Recheck at the extraction boundary, including for injected test transports.
+  // download() itself verifies the exact size and SHA-256 before returning.
+  // Recheck any other transport at the extraction boundary.
   progress('archive');
-  if ((await fs.stat(archive)).size !== spec.size || await hashFile(archive, LIMITS.download) !== spec.sha256) fail('Pinned archive SHA-256 or size mismatch');
+  if (downloadImpl !== download && ((await fs.stat(archive)).size !== spec.size
+      || await hashFile(archive, LIMITS.download) !== spec.sha256)) fail('Pinned archive SHA-256 or size mismatch');
   progress('extract');
   await extractImpl(archive, extraction, spec);
   const payload = path.join(extraction, spec.root);
@@ -718,7 +826,7 @@ async function main(argv = process.argv.slice(2), options = {}) {
     try { installed = await timing.phase(environment, 'launcher.ensure', () => ensureBinary(spec, { ...options,
       environment, registrationSource,
       cache: options.cache || cacheDirectory(environment, platform),
-      checkOnly: removing || setup?.checkOnly || false, reportCached: Boolean(setup),
+      checkOnly: removing || setup?.checkOnly || false, reportCached: Boolean(setup), reuseSelected: !removing,
       includePhone: removing || Boolean(setup) || argv[0] === 'phone',
       progress: options.progress || stageReporter(options.stderr || process.stderr) })); }
     catch (error) {
