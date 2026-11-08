@@ -126,6 +126,32 @@ async function captureShim(shim, entry, relative) {
   return { path: shim, info, data };
 }
 
+// Only the current global package's exact POSIX npm link is not a native
+// launcher. Regular files remain legacy candidates, even at this same name.
+async function ownCommandLink(file, packageRoot, platform) {
+  if (platform === 'win32') return false;
+  const prefix = await registration(packageRoot, platform);
+  if (prefix === null || file !== path.join(prefix, 'bin', 'stackbite')) return false;
+  const before = await fs.lstat(file);
+  if (!before.isSymbolicLink() || before.nlink !== 1) return false;
+  const relative = 'packaging/npm/bin/stackbite.js';
+  const metadata = JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'));
+  if (!metadata.bin || Object.keys(metadata.bin).length !== 1 || metadata.bin.stackbite !== relative) return false;
+  const entry = path.join(packageRoot, relative);
+  const target = await fs.readlink(file);
+  // Do not collapse target components: POSIX follows redirect/.. before
+  // applying the parent hop. Only npm's direct relative or absolute spelling
+  // uses exclusively the command/package parents verified below.
+  if (target !== path.relative(path.dirname(file), entry) && target !== entry) return false;
+  await commandParent(entry);
+  const info = await fs.lstat(entry);
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) return false;
+  const captured = await captureShim(file, entry, relative);
+  const after = await fs.lstat(file);
+  return captured && sameIdentity(before, captured.info) && sameIdentity(before, after)
+    && after.isSymbolicLink() && after.nlink === 1;
+}
+
 // The bootstrap.js replacement that lets the original bin finish registration-only removal.
 function recoveryModule(root, platform, node, cli, recoveryOptions) {
   const options = JSON.stringify({ packageRoot: root, platform, nodeExecutable: node, npmCli: cli,
@@ -445,4 +471,4 @@ async function assertSourceCleanupPins(pins) {
   }
 }
 
-module.exports = { registration, npmProgram, removeRegistration, explicitApply, descriptor, resumeWithoutRuntime, registrationOnly };
+module.exports = { registration, npmProgram, removeRegistration, explicitApply, descriptor, resumeWithoutRuntime, registrationOnly, ownCommandLink };

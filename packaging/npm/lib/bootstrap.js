@@ -280,10 +280,13 @@ async function baselinePin(file, environment, platform) {
   let info;
   try { info = await fs.lstat(file, { bigint: true }); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
-  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) fail('Invalid installation baseline file');
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) {
+    const kind = info.isSymbolicLink() ? 'symlink' : info.isFile() ? 'regular' : info.isDirectory() ? 'directory' : 'other';
+    fail(`Invalid installation baseline file: ${JSON.stringify(file)} (kind=${kind}, nlink=${info.nlink})`);
+  }
   return { device: info.dev.toString(), inode: info.ino.toString() };
 }
-async function captureBaseline(environment, platform, cachedHome) {
+async function captureBaseline(environment, platform, cachedHome, packageRoot) {
   const root = installationRoot(environment, platform);
   for (const name of ['default-install.json', 'install.json']) {
     const file = path.join(root, name);
@@ -313,7 +316,11 @@ async function captureBaseline(environment, platform, cachedHome) {
     }
   }
   const legacy = [];
-  for (const file of new Set(paths)) legacy.push({ path: file, identity: await baselinePin(file, environment, platform) });
+  for (const file of new Set(paths)) {
+    if (packageRoot && platform !== 'win32' && file === path.join(home, '.local', 'bin', 'stackbite')
+        && await exists(file) && await require('./uninstall-registration').ownCommandLink(file, packageRoot, platform)) continue;
+    legacy.push({ path: file, identity: await baselinePin(file, environment, platform) });
+  }
   return legacy.some(pin => pin.identity !== null) ? { root, incarnation: null, legacy } : null;
 }
 
@@ -368,6 +375,7 @@ async function pinRegistration(npm, options) {
     const held = await handle.stat({ bigint: true }), root = await fs.lstat(npm.root, { bigint: true });
     const identity = { device: held.dev.toString(), inode: held.ino.toString() };
     const source = {
+      packageRoot: npm.root,
       async validate() {
         const current = await fs.lstat(npm.root, { bigint: true });
         const descriptor = await require('./uninstall-registration').descriptor(options);
@@ -444,7 +452,7 @@ async function openPreparationFile(file) {
 }
 async function reservePreparation(environment, platform, target, source) {
   if (Object.hasOwn(environment, 'STACKBITE_INSTALL_BASELINE')) return null;
-  let baseline = await captureBaseline(environment, platform, target);
+  let baseline = await captureBaseline(environment, platform, target, source?.packageRoot);
   if (baseline) {
     environment.STACKBITE_INSTALL_BASELINE = JSON.stringify(baseline);
     return null;
