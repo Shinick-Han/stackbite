@@ -92,7 +92,7 @@ test('release spec refuses platform, glibc, identity, then pinned asset fields i
   const base = () => fixture().manifest;
   const glibc = { glibcVersionRuntime: '2.28' };
   const refusals = [
-    [m => { m.schema = 2; }, 'darwin', {}, /supported platforms/],
+    [m => { m.schema = 2; }, 'freebsd', {}, /supported platforms/],
     [m => { m.schema = 2; }, 'linux', { glibcVersionRuntime: undefined }, /Alpine\/musl/],
     [m => { m.schema = 2; m.platforms = {}; }, 'linux', glibc, /release identity/],
     [m => { m.commit = 'A'.repeat(40); }, 'linux', glibc, /release identity/],

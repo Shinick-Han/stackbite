@@ -35,11 +35,11 @@ function checkPinnedAsset(spec, manifest, root, asset) {
 }
 function releaseSpec(manifest, platform = process.platform, arch = process.arch, runtime = {}) {
   const key = `${platform}-${arch}`;
-  if (!['win32-x64', 'linux-x64', 'darwin-arm64'].includes(key)) fail(`Stackbite does not have a native release for ${key}; supported platforms are Windows x64, Linux x64 and macOS arm64.`);
+  if (!['win32-x64', 'linux-x64', 'darwin-arm64', 'darwin-x64'].includes(key)) fail(`Stackbite does not have a native release for ${key}; supported platforms are Windows x64, Linux x64 and macOS arm64/x64.`);
   checkLinuxRuntime(platform, runtime);
   checkReleaseIdentity(manifest);
   const spec = manifest.platforms?.[key];
-  const host = { win32: 'windows-x64', linux: 'linux-x86_64', darwin: 'macos-arm64' }[platform];
+  const host = { win32: 'windows-x64', linux: 'linux-x86_64', darwin: arch === 'x64' ? 'macos-x86_64' : 'macos-arm64' }[platform];
   const root = `stackbite-${manifest.version}-${host}-${manifest.commit.slice(0, 12)}`;
   const asset = root + (platform === 'win32' ? '.zip' : '.tar.gz');
   checkPinnedAsset(spec, manifest, root, asset);
@@ -151,7 +151,7 @@ async function nativeExecutable(root, spec, name = 'stackbite') {
     const header = Buffer.alloc(spec.platform === 'darwin' ? 16 : 4);
     if ((await file.read(header, 0, header.length, 0)).bytesRead !== header.length) fail('Invalid native executable identity');
     const valid = spec.platform === 'win32' ? header.subarray(0, 2).equals(Buffer.from('MZ'))
-      : spec.platform === 'darwin' ? header.readUInt32LE(0) === 0xfeedfacf && header.readUInt32LE(4) === 0x0100000c && header.readUInt32LE(12) === 2
+      : spec.platform === 'darwin' ? header.readUInt32LE(0) === 0xfeedfacf && header.readUInt32LE(4) === (spec.key === 'darwin-x64' ? 0x01000007 : 0x0100000c) && header.readUInt32LE(12) === 2
       : header.equals(Buffer.from([0x7f, 69, 76, 70]));
     if (!valid) fail('Invalid native executable identity');
   } finally { await file.close(); }
@@ -170,7 +170,7 @@ async function publicExecutable(root, spec, hashes) {
   }
   const manifest = JSON.parse((await readSmall(path.join(root, 'manifest.json'))).toString('utf8'));
   const entry = manifest.binaries?.['stackbite-launcher'], info = entry?.build_info;
-  const target = { win32: 'x86_64-pc-windows-msvc', linux: 'x86_64-unknown-linux-gnu', darwin: 'aarch64-apple-darwin' }[spec.platform];
+  const target = { win32: 'x86_64-pc-windows-msvc', linux: 'x86_64-unknown-linux-gnu', darwin: spec.key === 'darwin-x64' ? 'x86_64-apple-darwin' : 'aarch64-apple-darwin' }[spec.platform];
   if (!terminalBuildMatches(manifest, spec, target) || !launcherPinMatches(manifest, entry, name, hashes)
       || !launcherBuildInfoMatches(info, spec, target)) fail('Native entry package identity or pin is invalid');
   const launcher = await nativeExecutable(root, spec, 'stackbite-launcher');

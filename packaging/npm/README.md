@@ -3,8 +3,8 @@
 Work Stack organizes the work. Stackbite gets it moving.
 
 Node.js 20 or newer is required. The portable runtime is available for Windows x64,
-Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
-Intel Mac, Linux ARM and musl/Alpine builds are not supplied.
+Linux x64 with glibc 2.28 or newer, and Apple Silicon / Intel macOS 13 or newer.
+Intel Mac support starts with 0.5.115. Linux ARM and musl/Alpine builds are not supplied.
 Python installation and compilation are unnecessary. Archive extraction requires
 `tar` (included in macOS, current Windows and common Linux distributions).
 
@@ -62,8 +62,9 @@ preparation can be retried; an invalid existing runtime is reported and left in 
 
 Update a registry installation with `npm install --global stackbite@latest`.
 
-On a Mac, use the native Apple Silicon Node.js installation so that
-`node -p process.arch` prints `arm64`. Install and sign in to provider CLIs such
+The launcher selects the archive using Node.js `process.arch`: `x64` selects Intel and `arm64` selects Apple Silicon using the matching reviewed pin. An x64 Node.js process under Rosetta selects the x64 archive; this does not establish Intel hardware qualification.
+
+Use a native Node.js installation for your Mac architecture. Install and sign in to provider CLIs such
 as Codex or Claude separately. Stackbite can open without a provider login.
 The Mac binaries use ad-hoc signing; they are not Developer ID signed or notarized.
 
@@ -142,7 +143,7 @@ The measurement reports fixture sizes and each preparation stage plus warm check
 and launch validation costs. It uses disposable cache data and an inert child
 stub; its timings are not measurements of released native bundles or providers.
 
-Build and verify Windows x64, Linux x64 and macOS ARM64 archives from the same
+Build and verify Windows x64, Linux x64, macOS ARM64 and macOS x64 archives from the same
 immutable source first, following [platform policy](../../docs/platform-release-policy.md).
 Prepare the pinned manifest
 from their exact extracted bundles and archive bytes:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# StackBite 0.5.114, source commit 884a985d7f9c9397b3ec2e7e0d0170eee63da50e.
+# StackBite 0.5.115, source commit e012e1ca5cea347e22115c4627c5fa5b5779eb1f.
 set -eu
 run=yes
 case "${1:-}" in
@@ -9,15 +9,17 @@ case "${1:-}" in
 esac
 [ "$#" -eq 0 ] || { echo 'Usage: sh install.sh [--no-run]' >&2; exit 2; }
 case "$(uname -s):$(uname -m)" in
-    Darwin:arm64) url='https://github.com/Shinick-Han/stackbite/releases/download/v0.5.114/stackbite-0.5.114-macos-arm64-884a985d7f9c.tar.gz'; expected='2cb3b272471d141b203c33b3a254c66c93092a7016894f708c238b284dab44b5'; root='stackbite-0.5.114-macos-arm64-884a985d7f9c'; hash=shasum ;;
-    Linux:x86_64) url='https://github.com/Shinick-Han/stackbite/releases/download/v0.5.114/stackbite-0.5.114-linux-x86_64-884a985d7f9c.tar.gz'; expected='243d57feb18a8ac417f9ce6beefefd7ee6f5a0e69f4a346cb72e92274d8d42c1'; root='stackbite-0.5.114-linux-x86_64-884a985d7f9c'; hash=sha256sum ;;
-    *) echo 'StackBite supports macOS arm64 and Linux x86_64.' >&2; exit 1 ;;
+    Darwin:arm64) url='https://github.com/Shinick-Han/stackbite/releases/download/v0.5.115/stackbite-0.5.115-macos-arm64-e012e1ca5cea.tar.gz'; expected='ed09d5a0d2bc885563031535f2de2d4bf50a7b08df7f4b1c1d6abf81415b14df'; root='stackbite-0.5.115-macos-arm64-e012e1ca5cea'; hash=shasum ;;
+    Darwin:x86_64) url='https://github.com/Shinick-Han/stackbite/releases/download/v0.5.115/stackbite-0.5.115-macos-x86_64-e012e1ca5cea.tar.gz'; expected='6f77041fa9f0f2bb8c7cd69cb28f606a0d6fd588bd057868a21d68eb0cf2b91d'; root='stackbite-0.5.115-macos-x86_64-e012e1ca5cea'; hash=shasum ;;
+    Linux:x86_64) url='https://github.com/Shinick-Han/stackbite/releases/download/v0.5.115/stackbite-0.5.115-linux-x86_64-e012e1ca5cea.tar.gz'; expected='45a0d7762a1b0124ff6cc7df4a0d0c7e0b9b83f2ce55cdfc5c6f39efc9f47013'; root='stackbite-0.5.115-linux-x86_64-e012e1ca5cea'; hash=sha256sum ;;
+    *) echo 'StackBite supports macOS arm64/x86_64 and Linux x86_64.' >&2; exit 1 ;;
 esac
+[ -n "$url" ] || { echo 'This installer has no reviewed release pin for this architecture.' >&2; exit 1; }
 stage=$(mktemp -d "${TMPDIR:-/tmp}/stackbite-install.XXXXXXXX")
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-printf 'Installing StackBite 0.5.114...\n'
+printf 'Installing StackBite 0.5.115...\n'
 curl -fsSL "$url" -o "$stage/archive.tar.gz"
 if [ "$hash" = shasum ]; then
     actual=$(shasum -a 256 "$stage/archive.tar.gz")

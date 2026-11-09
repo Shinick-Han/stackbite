@@ -55,14 +55,14 @@ function zip(records) {
   end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
   return Buffer.concat([...local, directory, end]);
 }
-function fixture(platform = 'linux', changes = {}, extraFiles = {}) {
-  const host = platform === 'win32' ? 'windows-x64' : platform === 'darwin' ? 'macos-arm64' : 'linux-x86_64';
+function fixture(platform = 'linux', changes = {}, extraFiles = {}, arch = platform === 'darwin' ? 'arm64' : 'x64') {
+  const host = platform === 'win32' ? 'windows-x64' : platform === 'darwin' ? (arch === 'x64' ? 'macos-x86_64' : 'macos-arm64') : 'linux-x86_64';
   const root = `stackbite-${VERSION}-${host}-${COMMIT.slice(0, 12)}`;
   const asset = root + (platform === 'win32' ? '.zip' : '.tar.gz');
   const metadata = Buffer.from(JSON.stringify({ version: VERSION, commit: COMMIT, product: 'Stackbite', command: 'stackbite', platform: host, ...changes }));
   const image = platform === 'win32' ? 'stackbite.exe' : 'stackbite';
   const files = { 'portable.json': metadata, 'runtime/build-info.json': metadata,
-    [image]: platform === 'win32' ? Buffer.from('MZfixture image') : platform === 'darwin' ? Buffer.from('cffaedfe0c0000010000000002000000', 'hex') : Buffer.from('\x7fELFfixture image'),
+    [image]: platform === 'win32' ? Buffer.from('MZfixture image') : platform === 'darwin' ? Buffer.from(arch === 'x64' ? 'cffaedfe070000010000000002000000' : 'cffaedfe0c0000010000000002000000', 'hex') : Buffer.from('\x7fELFfixture image'),
     'runtime/owned.txt': Buffer.from('fixed runtime fixture'), ...extraFiles };
   const hashes = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, digest(bytes)]));
   const manifestBytes = Buffer.from(JSON.stringify(hashes));
@@ -72,7 +72,7 @@ function fixture(platform = 'linux', changes = {}, extraFiles = {}) {
   const bytes = platform === 'win32' ? zip(records) : gzipSync(tar(records));
   const pinned = { asset, url: `https://github.com/Shinick-Han/stackbite/releases/download/v${VERSION}/${asset}`, root,
     sha256: digest(bytes), size: bytes.length, manifestSha256: digest(manifestBytes), metadataSha256: digest(metadata) };
-  const manifest = { schema: 1, version: VERSION, commit: COMMIT, repository: 'Shinick-Han/stackbite', platforms: { [`${platform}-${platform === 'darwin' ? 'arm64' : 'x64'}`]: pinned } };
+  const manifest = { schema: 1, version: VERSION, commit: COMMIT, repository: 'Shinick-Han/stackbite', platforms: { [`${platform}-${arch}`]: pinned } };
   return { bytes, pinned, manifest, root, files, image };
 }
 // Validation fixtures contain inert image bytes. Replace only the engine's

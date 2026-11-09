@@ -55,6 +55,13 @@ async function download(spec, destination, { request = https.get, timeout = LIMI
       if (size !== spec.size || await hashFile(destination, LIMITS.download) !== spec.sha256) fail('Release SHA-256 or size mismatch');
       return;
     }
+  } catch (error) {
+    if (error.code === 'ECONNRESET') {
+      const interrupted = new Error('Release download was interrupted before completion (connection reset).', { cause: error });
+      interrupted.code = 'STACKBITE_DOWNLOAD_INTERRUPTED';
+      throw interrupted;
+    }
+    throw error;
   } finally { clearTimeout(timer); }
 }
 module.exports = { download, secureURL };

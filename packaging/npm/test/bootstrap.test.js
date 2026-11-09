@@ -32,9 +32,11 @@ test('package contract has no install hook/runtime dependencies and ships only t
 test('shipped pin identity is valid; unsupported architectures and alternate URLs fail before download', () => {
   const manifest = require('../release.json');
   for (const platform of ['win32', 'linux']) assert.equal(releaseSpec(manifest, platform, 'x64').version, VERSION);
-  for (const [platform, arch] of [['darwin', 'x64'], ['linux', 'arm64'], ['win32', 'arm64']]) {
+  for (const [platform, arch] of [['darwin', 'ia32'], ['linux', 'arm64'], ['win32', 'arm64']]) {
     assert.throws(() => releaseSpec(manifest, platform, arch), /supported platforms/);
   }
+  if (manifest.platforms['darwin-x64']) assert.equal(releaseSpec(manifest, 'darwin', 'x64').version, VERSION);
+  else assert.throws(() => releaseSpec(manifest, 'darwin', 'x64'), /pinned release asset/);
   const value = fixture();
   value.manifest.platforms['linux-x64'].url += '?alternate=true';
   assert.throws(() => releaseSpec(value.manifest, 'linux', 'x64'), /pinned release asset/);
@@ -315,3 +317,22 @@ test('macOS setup caches the runtime and normal launch passes the verified execu
   assert.equal(invoked.config.shell, false);
   assert.equal(invoked.config.env.STACKBITE_HOME, path.dirname(invoked.executable));
 });
+
+for (const arch of ['arm64', 'x64']) {
+  test(`macOS ${arch} pins the matching archive and refuses the other CPU and platform`, async t => {
+    const area = await owned(t), value = fixture('darwin', {}, {}, arch);
+    const spec = releaseSpec(value.manifest, 'darwin', arch);
+    assert.equal(spec.host, arch === 'x64' ? 'macos-x86_64' : 'macos-arm64');
+    assert.equal(spec.key, `darwin-${arch}`);
+    const installed = await ensureBinary(spec, { cache: path.join(area, 'cache'), downloadImpl: writeFixture(value) });
+    assert.equal(await validatePayload(installed.home, spec), installed.executable);
+    const other = fixture('darwin', {}, {}, arch === 'x64' ? 'arm64' : 'x64');
+    const wrongImage = fixture('darwin', {}, { stackbite: other.files.stackbite }, arch);
+    await assert.rejects(ensureBinary(releaseSpec(wrongImage.manifest, 'darwin', arch), {
+      cache: path.join(area, 'wrong-image'), downloadImpl: writeFixture(wrongImage) }), /executable identity/);
+    const wrongPlatform = fixture('darwin', { platform: arch === 'x64' ? 'macos-arm64' : 'macos-x86_64' }, {}, arch);
+    await assert.rejects(ensureBinary(releaseSpec(wrongPlatform.manifest, 'darwin', arch), {
+      cache: path.join(area, 'wrong-platform'), downloadImpl: writeFixture(wrongPlatform) }), /identity mismatch/);
+    assert.throws(() => releaseSpec(other.manifest, 'darwin', arch), /pinned release asset/);
+  });
+}

@@ -73,3 +73,33 @@ test('an unending response is aborted within the fixed download deadline', async
   await assert.rejects(download(spec, path.join(root, 'timeout'), { request: transport([{ neverEnd: true }]), timeout: 30 }), /abort|timeout/i);
   assert.ok(Date.now() - start < 2000);
 });
+
+test('an interrupted HTTP body identifies the download stage and preserves its cause without retry', async t => {
+  const http = require('node:http');
+  const root = await owned(t);
+  let serving, requests = 0;
+  const server = http.createServer((_request, response) => {
+    serving = response;
+    response.writeHead(200, { 'content-length': body.length });
+    response.write(body.subarray(0, 3));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const request = (_approvedURL, options, callback) => {
+    requests++;
+    return http.get({ host: '127.0.0.1', port: server.address().port, path: '/', signal: options.signal }, response => {
+      callback(response);
+      setImmediate(() => serving.destroy());
+    });
+  };
+  await assert.rejects(download(spec, path.join(root, 'interrupted'), { request }), error => {
+    assert.equal(error.code, 'STACKBITE_DOWNLOAD_INTERRUPTED');
+    assert.equal(error.cause.code, 'ECONNRESET');
+    assert.match(error.message, /Release download was interrupted before completion/);
+    return true;
+  });
+  assert.equal(requests, 1);
+});
