@@ -3,9 +3,8 @@
 Work Stack organizes the work. Stackbite gets it moving.
 
 Node.js 20 or newer is required. The portable runtime is available for Windows x64,
-Linux x64 with glibc, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
-The Mac build is qualified on M4 with macOS 26.2. Intel Mac, Linux ARM and
-musl/Alpine builds are not supplied.
+Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS (M1 or later, macOS 13 or newer).
+Intel Mac, Linux ARM and musl/Alpine builds are not supplied.
 Python installation and compilation are unnecessary. Archive extraction requires
 `tar` (included in macOS, current Windows and common Linux distributions).
 
@@ -14,13 +13,13 @@ Python installation and compilation are unnecessary. Archive extraction requires
 Choose one method. For a single run, use the public npm package:
 
 ```sh
-npx --yes stackbite
+npx --yes stackbite@latest
 ```
 
 For a persistent command, install it globally, prepare the runtime, then launch:
 
 ```sh
-npm install --global stackbite
+npm install --global stackbite@latest
 stackbite setup
 stackbite
 ```
@@ -28,19 +27,20 @@ stackbite
 Global installation installs the small launcher without a postinstall download.
 `stackbite setup` downloads and fully validates its pinned runtime without starting
 the app or backend. It prints short stages to stderr. If setup is omitted, the
-first launch prepares the runtime with the same stages. Cached launches remain
-quiet and fully validate the runtime every time. Running both installation methods
+first launch prepares the runtime with the same stages. Cached launches reuse the
+prepared runtime and verify the selected payload; setup checks the full pinned
+bundle, including optional components. Running both installation methods
 is unnecessary.
 
-The source bootstrapper selects the verified frozen `stackbite.exe` engine on
-Windows. Its installed defaults open the Rust TUI and native terminal owner.
-Linux and macOS select the verified `stackbite-launcher` when bundled. Every
-pinned file, including the Windows native launcher, is validated before launch.
+The launcher selects the verified native `stackbite.exe` entry on Windows and
+`stackbite-launcher` on Linux and macOS. The runtime contains the Rust frontend,
+Room management service and terminal owner; Python is not bundled or required.
+Keep the complete downloaded payload intact.
 
 The same preparation command works through npx:
 
 ```sh
-npx --yes stackbite setup
+npx --yes stackbite@latest setup
 ```
 
 Check a prepared runtime offline with `stackbite setup --check`. The launcher
@@ -51,12 +51,14 @@ with status 0 when valid and status 1 when absent or invalid; an absent cache ne
 The launcher check is read-only; npx itself may install its npm package before
 invoking it, so use the installed command for an entirely offline check.
 
-Binary caches use `%LOCALAPPDATA%\Stackbite\cache` on Windows and
-`${XDG_CACHE_HOME:-~/.cache}/stackbite` on Linux and macOS. `LOCALAPPDATA`, `XDG_CACHE_HOME`
-and `HOME` overrides retain their normal behavior. These caches are separate from
-application state. Interrupted preparation removes only its own temporary staging
-directory and can be retried. An invalid existing runtime is reported and left in
-place; setup does not delete or overwrite it.
+Prepared runtimes live under `%LOCALAPPDATA%\Stackbite\app\<version>-<source12>`
+on Windows and `${XDG_DATA_HOME:-~/.local/share}/stackbite/app/stackbite-<version>-<platform>-<source12>`
+on Linux and macOS, with an archive-pin suffix when needed. The selected installation
+root determines this location; changing `XDG_CACHE_HOME` does not move it.
+Legacy images under `%LOCALAPPDATA%\Stackbite\cache` or
+`${XDG_CACHE_HOME:-~/.cache}/stackbite` can be verified and adopted into the installation.
+Room/state data is separate. Downloads use owned system-temp staging. Interrupted
+preparation can be retried; an invalid existing runtime is reported and left in place.
 
 Update a registry installation with `npm install --global stackbite@latest`.
 
@@ -65,28 +67,22 @@ On a Mac, use the native Apple Silicon Node.js installation so that
 as Codex or Claude separately. Stackbite can open without a provider login.
 The Mac binaries use ad-hoc signing; they are not Developer ID signed or notarized.
 
-Preview product removal with `stackbite uninstall` (`stackbite delete` is an
-alias). Choose `--keep-data --apply` to retain data/hooks or `--all --apply`
-to remove selected product data/hooks too. Removal uses only an already cached
-verified runtime and never downloads one. Shared Helm/custom state and npm's
-own package registration/cache are preserved. See [removal and recovery](../../docs/uninstall.md).
+Preview product removal with `stackbite uninstall --preview` (`stackbite delete`
+is an alias). `stackbite uninstall` performs removal; add `--keep-data` to retain
+product data and hooks. Removal uses only an already cached
+verified runtime and never downloads one. The verified global Stackbite npm
+registration and command shims are removed. npm itself, unrelated packages, shared
+prefix directories and npx caches remain. Shared Helm/custom state is preserved.
+See [removal and recovery](../../docs/uninstall.md).
 
 ## Direct GitHub package
 
-Run the package attached to the verified GitHub release:
-
-```sh
-npx --yes https://github.com/Shinick-Han/stackbite/releases/download/v0.5.20/stackbite-0.5.20.tgz
-```
-
-Arguments go after the package URL, for example `--version` or `--status`. For a
-persistent command, install that same package globally:
-
-```sh
-npm install --global https://github.com/Shinick-Han/stackbite/releases/download/v0.5.20/stackbite-0.5.20.tgz
-stackbite setup
-stackbite
-```
+Open the [public release](https://github.com/Shinick-Han/stackbite/releases/latest)
+and copy its exact attached `stackbite-VERSION.tgz` URL when an explicit version
+is needed. Pass that URL to `npx --yes` for one run, or to
+`npm install --global` for a persistent command. Arguments such as `--version`
+go after the URL. Use a published asset; a candidate version in documentation
+does not establish that a package is available.
 
 The core source repository remains private at `shinick-dev/stackbite`. The separate
 public `Shinick-Han/stackbite` repository distributes only this thin launcher and
@@ -110,7 +106,7 @@ existing configured state and keeps live databases, authentication and records
 in place. New state uses `%LOCALAPPDATA%\Stackbite\state` or
 `${XDG_STATE_HOME:-~/.local/state}/stackbite`.
 Rooms, Seats, authentication, provider configuration, journals and Work Stack
-contracts are not renamed or migrated. Binary cache data is separate from this
+contracts retain their existing identities. Binary cache data is separate from this
 state. Installing or launching the npm package does not stop an existing backend.
 Check the connected server's capabilities before using newly added runtime features.
 
@@ -119,12 +115,17 @@ arguments directly to the native app. Its `setup` command only prepares/checks t
 runtime. It does not insert a second screen renderer or an agent provider.
 Frontend selection belongs to the native runtime: the launcher adds no
 `STACKBITE_FRONTEND` value and passes the caller's value unchanged. Installed
-native runtimes built from current source open the Rust screen when nothing
-selects a frontend; `--frontend python`, `STACKBITE_FRONTEND=python` or a saved
-`stackbite config set frontend python` keep Python, in that precedence. A missing
-or invalid Rust frontend exits with an error and does not fall back to Python. The
-release pinned in `release.json` determines which runtime behavior a package
-delivers.
+native runtimes open the Rust screen and native owner. Legacy `python` frontend,
+owner and core selectors remain accepted as aliases for native execution;
+`config show` reports requested and effective values. There is no Python runtime
+fallback. The release pinned in `release.json` determines the behavior delivered
+by that npm package.
+
+Installing a package, activating management, and moving an existing Seat to a
+new owner are separate operations. Room/Seat definitions and saved history
+persist, but some provider conversations require manual resume and an owner
+change can replace generation/PID. See [updates and restart](../../docs/update.md)
+and [first use](../../docs/first-use.md).
 Global npm installation creates only the `stackbite` command; it does not claim an
 external `helm` command or replace independent Kubernetes tooling.
 
@@ -141,11 +142,13 @@ The measurement reports fixture sizes and each preparation stage plus warm check
 and launch validation costs. It uses disposable cache data and an inert child
 stub; its timings are not measurements of released native bundles or providers.
 
-Build and verify both native platform archives first. Prepare the pinned manifest
+Build and verify Windows x64, Linux x64 and macOS ARM64 archives from the same
+immutable source first, following [platform policy](../../docs/platform-release-policy.md).
+Prepare the pinned manifest
 from their exact extracted bundles and archive bytes:
 
 ```sh
-python scripts/prepare_npm_release.py --version 0.5.20
+python scripts/prepare_npm_release.py --version X.Y.Z
 npm test
 npm pack
 ```
@@ -153,7 +156,8 @@ npm pack
 Keep `package.json` and `packaging/npm/release.json` versions equal. Inspect `npm
 pack --dry-run` before publishing; the package must include the launcher and pinned
 manifest, and exclude native runtimes, installed state, credentials, tests and
-development worktrees. Test the packed package with `npx` on both platforms.
+development worktrees. Test the packed package on each supported platform.
+Record native runtime acceptance separately from source checks and cross-compilation.
 
 Attach `stackbite-<version>.tgz` and its SHA-256 sidecar to the corresponding GitHub
 release in the public distribution repository. Copy only the npm file allowlist to
@@ -171,4 +175,7 @@ in this repository, prompts or package files. The repository currently specifies
 `UNLICENSED` for the JavaScript wrapper instead of inventing a license for the app;
 native runtime dependency notices remain in each platform archive.
 
-Runtime cache directories use a compact SHA-256 of the complete version, source commit, platform and archive identity. All full archive, manifest and file hashes are still verified on every launch. Existing longer cache directories are retained.
+Archive hashes are checked during preparation; cached launches verify the selected
+native payload. `setup --check` verifies the full pinned runtime without downloading
+or writing it. The compact SHA-256 `v1-...` names belong to legacy cache lookup,
+not the current durable installation layout described above.
