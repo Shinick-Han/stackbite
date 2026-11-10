@@ -4,11 +4,11 @@ $ErrorActionPreference = 'Stop'
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     throw 'Stackbite installation requires FullLanguage; contact your administrator about the active PowerShell policy.'
 }
-$version = '0.5.116'
-$commit = 'fa8186c81189ba40b692a112d6aa89e142474072'
-$url = 'https://github.com/Shinick-Han/stackbite/releases/download/v0.5.116/stackbite-0.5.116-windows-x64-fa8186c81189.zip'
-$expected = 'da231a56489bab50cf7d8e12ee780c38bf4d2fc9ec19a1ff24f8c2df6f41f512'
-$root = 'stackbite-0.5.116-windows-x64-fa8186c81189'
+$version = '0.5.117'
+$commit = '1d6fd7fa4a8c4f3e76d6e858ec6d5147905d7f35'
+$url = 'https://github.com/Shinick-Han/stackbite/releases/download/v0.5.117/stackbite-0.5.117-windows-x64-1d6fd7fa4a8c.zip'
+$expected = '29c5ddbb6a3cc191bf0fb480c108c9b97293d2509e85aa0bf315b9e086114235'
+$root = 'stackbite-0.5.117-windows-x64-1d6fd7fa4a8c'
 if ($expected -notmatch '^[0-9a-fA-F]{64}$' -or $commit -notmatch '^[0-9a-fA-F]{40}$' -or
     $root -notmatch '^[a-zA-Z0-9._-]+$') { throw 'Invalid bootstrap release identity' }
 

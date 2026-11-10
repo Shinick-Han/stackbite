@@ -33,8 +33,10 @@ The npm package is a small launcher. `setup` downloads and verifies its pinned
 native bundle without opening the app; first launch also prepares it if needed.
 Later launches reuse the verified cache. `npx --yes stackbite@latest` also works.
 
-Native bundles: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon / Intel
-macOS 13+. Linux ARM and musl/Alpine bundles are not provided.
+Native bundles in 0.5.117: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
+macOS 13+. Intel macOS is not included in this release; its last verified version is
+0.5.116 (`npm install --global stackbite@0.5.116`). Linux ARM and musl/Alpine bundles
+are not provided.
 Download and extract the **entire** archive from
 [latest release](https://github.com/Shinick-Han/stackbite/releases/latest).
 
@@ -58,7 +60,8 @@ stackbite stop --apply
 ```
 
 `update --apply` installs the released runtime and coordinates engine transition.
-Active Seats and older owners can finish transition separately; a client version
+Live CLIs remain running by default; explicit Stop and Resume can move them to a
+new engine. Active Seats and older owners can finish transition separately; a client version
 alone does not prove every running engine has changed. `restart` recovers the
 local Room service while retaining definitions and records; it does not guarantee
 that every interrupted CLI resumes its prior conversation.
@@ -71,7 +74,7 @@ that every interrupted CLI resumes its prior conversation.
 This repository distributes installers, signed native release artifacts and the
 npm launcher. The core source repository is private. See release notes for the
 actual platform validation and known limitations of each version. Published
-release: **0.5.116**.
+release: **0.5.117**.
 
 ## Keyboard shortcuts
 
