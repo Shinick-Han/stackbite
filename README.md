@@ -71,7 +71,7 @@ that every interrupted CLI resumes its prior conversation.
 This repository distributes installers, signed native release artifacts and the
 npm launcher. The core source repository is private. See release notes for the
 actual platform validation and known limitations of each version. Published
-release: **0.5.115**.
+release: **0.5.116**.
 
 ## Keyboard shortcuts
 
