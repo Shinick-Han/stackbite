@@ -161,19 +161,26 @@ async function nativeExecutable(root, spec, name = 'stackbite') {
 // The release pins the whole payload before this mapping. Windows opens the
 // frozen engine, which selects the Rust TUI/owner; POSIX opens the native entry.
 // A bundled native entry is validated on every platform before either choice.
+// The launcher role's payload is its package manifest's closed choice: the
+// legacy `stackbite-launcher[.exe]` (pinned beside a public copy) or, in a
+// one-file package, the public `stackbite[.exe]` entry itself. A declared
+// role is always fully validated, with or without the legacy release pin.
 async function publicExecutable(root, spec, hashes) {
   const engine = await nativeExecutable(root, spec);
-  const name = 'stackbite-launcher' + (spec.platform === 'win32' ? '.exe' : '');
-  if (!Object.hasOwn(hashes, name)) {
-    if (await exists(path.join(root, name))) fail('Native entry is present without a release pin');
-    return engine;
-  }
-  const manifest = JSON.parse((await readSmall(path.join(root, 'manifest.json'))).toString('utf8'));
-  const entry = manifest.binaries?.['stackbite-launcher'], info = entry?.build_info;
+  const suffix = spec.platform === 'win32' ? '.exe' : '';
+  const legacy = 'stackbite-launcher' + suffix, entryName = 'stackbite' + suffix;
+  const pinned = Object.hasOwn(hashes, legacy);
+  if (!pinned && await exists(path.join(root, legacy))) fail('Native entry is present without a release pin');
+  const manifest = pinned || Object.hasOwn(hashes, 'manifest.json')
+    ? JSON.parse((await readSmall(path.join(root, 'manifest.json'))).toString('utf8')) : null;
+  const entry = manifest?.binaries?.['stackbite-launcher'], info = entry?.build_info;
+  if (!pinned && entry === undefined) return engine;
+  const name = pinned ? legacy : entryName, other = pinned ? entryName : legacy;
   const target = { win32: 'x86_64-pc-windows-msvc', linux: 'x86_64-unknown-linux-gnu', darwin: spec.key === 'darwin-x64' ? 'x86_64-apple-darwin' : 'aarch64-apple-darwin' }[spec.platform];
   if (!terminalBuildMatches(manifest, spec, target) || !launcherPinMatches(manifest, entry, name, hashes)
+      || Object.hasOwn(manifest.artifacts ?? {}, other)
       || !launcherBuildInfoMatches(info, spec, target)) fail('Native entry package identity or pin is invalid');
-  const launcher = await nativeExecutable(root, spec, 'stackbite-launcher');
+  const launcher = await nativeExecutable(root, spec, name.slice(0, name.length - suffix.length));
   return spec.platform === 'win32' ? engine : launcher;
 }
 function terminalBuildMatches(manifest, spec, target) {
@@ -191,12 +198,23 @@ function launcherBuildInfoMatches(info, spec, target) {
     && info.product === 'Stackbite' && info.binary === 'stackbite-launcher' && info.version === spec.version
     && info.commit === spec.commit && info.target === target && info.protocol === 1;
 }
+// The pinned inventory's own shape: a core release declares no phone/ member
+// (any phone/ file is then an undeclared member); a full release declares the
+// Phone component through its component manifest.
+const PHONE_COMPONENTS = 'phone/stackbite-phone-components.json';
+function declaresPhone(expected) {
+  const phone = [...expected].some(name => name.startsWith('phone/'));
+  if (phone && !expected.has(PHONE_COMPONENTS)) fail('Release Phone component manifest is not pinned');
+  return phone;
+}
 async function validatePayload(directory, spec, { includePhone = true } = {}) {
   const root = await payloadRoot(directory);
   const { hashes, metadata } = await pinnedDocuments(root, spec);
   const expected = expectedMembers(hashes);
-  if (!includePhone) for (const name of expected) if (name.startsWith('phone/')) expected.delete(name);
-  const actual = await payloadFiles(root, expected, hashes, includePhone);
+  // Only a declared Phone component may be deferred to its activation check.
+  const deferPhone = declaresPhone(expected) && !includePhone;
+  if (deferPhone) for (const name of expected) if (name.startsWith('phone/')) expected.delete(name);
+  const actual = await payloadFiles(root, expected, hashes, !deferPhone);
   await checkMemberSet(root, spec, hashes, expected, actual);
   await checkProductIdentity(root, spec, metadata);
   return publicExecutable(root, spec, hashes);
@@ -829,7 +847,8 @@ async function main(argv = process.argv.slice(2), options = {}) {
     const cold = await coldAnswer(argv, spec, options.runtime || runtimeDirectory(environment, platform), options);
     if (cold) return cold;
     // First install always verifies everything. Cached TUI/runtime starts defer only
-    // Phone; explicit phone/setup/removal commands retain the full pinned check.
+    // a declared Phone component; explicit phone/setup/removal commands retain the
+    // full pinned check. A core release has no Phone to defer or fetch.
     let installed;
     try { installed = await timing.phase(environment, 'launcher.ensure', () => ensureBinary(spec, { ...options,
       environment, registrationSource,

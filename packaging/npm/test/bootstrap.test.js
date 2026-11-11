@@ -24,7 +24,7 @@ async function owned(t) {
 const writeFixture = value => async (spec, target) => fs.writeFile(target, value.bytes, { flag: 'wx' });
 test('package contract has no install hook/runtime dependencies and ships only the bootstrapper', () => {
   const pkg = require('../../../package.json');
-  assert.equal(pkg.name, 'stackbite'); assert.match(pkg.version, /^\d+\.\d+\.\d+$/); assert.equal(pkg.license, 'UNLICENSED');
+  assert.equal(pkg.name, 'stackbite'); assert.match(pkg.version, /^\d+\.\d+\.\d+$/); assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.engines.node, '>=20'); assert.equal(pkg.bin.stackbite, 'packaging/npm/bin/stackbite.js');
   assert.equal(pkg.dependencies, undefined); assert.equal(pkg.scripts.postinstall, undefined);
   assert.deepEqual(pkg.files, ['packaging/npm/bin/', 'packaging/npm/lib/', 'packaging/npm/release.json']);

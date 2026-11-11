@@ -1,8 +1,8 @@
 {
   "name": "stackbite",
-  "version": "0.5.118",
+  "version": "0.5.119",
   "description": "Verified native Stackbite CLI bootstrapper",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   },
@@ -19,7 +19,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Shinick-Han/stackbite.git"
+    "url": "https://github.com/shinick-dev/stackbite.git"
   },
-  "homepage": "https://github.com/Shinick-Han/stackbite"
+  "homepage": "https://github.com/shinick-dev/stackbite"
 }

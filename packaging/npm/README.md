@@ -1,11 +1,9 @@
 # Stackbite through npm and npx
 
-Work Stack organizes the work. Stackbite gets it moving.
-
-Node.js 20 or newer is required. Release 0.5.117 supplies Windows x64,
+Node.js 20 or newer is required. Release 0.5.118 supplies Windows x64,
 Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS 13 or newer.
-Intel is excluded from 0.5.117; use `npm install --global stackbite@0.5.116`
-on Intel Macs. The 0.5.117 npm package has no Intel runtime pin; its current
+Intel is excluded from 0.5.118; use `npm install --global stackbite@0.5.116`
+on Intel Macs. The 0.5.118 npm package has no Intel runtime pin; its current
 missing-pin error is generic, and automatic selection of an older qualified
 platform version is not implemented. Linux ARM and musl/Alpine builds are not supplied.
 Python installation and compilation are unnecessary. Archive extraction requires
@@ -36,7 +34,8 @@ bundle, including optional components. Running both installation methods
 is unnecessary.
 
 The launcher selects the verified native `stackbite.exe` entry on Windows and
-`stackbite-launcher` on Linux and macOS. The runtime contains the Rust frontend,
+the verified native entry on Linux and macOS: `stackbite` itself in a one-file
+package, or `stackbite-launcher` in an older package that pins it. The runtime contains the Rust frontend,
 Room management service and terminal owner; Python is not bundled or required.
 Keep the complete downloaded payload intact.
 
@@ -66,8 +65,8 @@ preparation can be retried; an invalid existing runtime is reported and left in 
 Update a registry installation with `npm install --global stackbite@latest`.
 
 The launcher uses Node.js `process.arch`: `arm64` selects the Apple Silicon pin;
-`x64` requires an Intel pin, which 0.5.117 does not contain. An x64 Node.js process
-under Rosetta also needs that Intel pin: use native arm64 Node.js for 0.5.117 on
+`x64` requires an Intel pin, which 0.5.118 does not contain. An x64 Node.js process
+under Rosetta also needs that Intel pin: use native arm64 Node.js for 0.5.118 on
 Apple Silicon. Rosetta execution is not native Intel hardware qualification.
 
 Use a native Node.js installation for your Mac architecture. Install and sign in to provider CLIs such
@@ -91,7 +90,7 @@ is needed. Pass that URL to `npx --yes` for one run, or to
 go after the URL. Use a published asset; a candidate version in documentation
 does not establish that a package is available.
 
-The core source repository remains private at `shinick-dev/stackbite`. The separate
+MIT-licensed source is public at `shinick-dev/stackbite`. The separate
 public `Shinick-Han/stackbite` repository distributes only this thin launcher and
 verified compiled runtime releases; installers need no GitHub or npm login.
 Registry-free distribution does not require publishing rights on npm.
@@ -112,7 +111,7 @@ owns state discovery and migration for both npm and direct launches. It reuses
 existing configured state and keeps live databases, authentication and records
 in place. New state uses `%LOCALAPPDATA%\Stackbite\state` or
 `${XDG_STATE_HOME:-~/.local/state}/stackbite`.
-Rooms, Seats, authentication, provider configuration, journals and Work Stack
+Rooms, Seats, authentication, provider configuration, journals and integration
 contracts retain their existing identities. Binary cache data is separate from this
 state. Installing or launching the npm package does not stop an existing backend.
 Check the connected server's capabilities before using newly added runtime features.
@@ -168,8 +167,8 @@ Record native runtime acceptance separately from source checks and cross-compila
 
 Attach `stackbite-<version>.tgz` and its SHA-256 sidecar to the corresponding GitHub
 release in the public distribution repository. Copy only the npm file allowlist to
-that repository; never push the private core history, state, personal notes or
-credentials. Native archives must retain dependency license notices. Publishing
+that repository; keep full source in the source repository and exclude state, personal notes and
+credentials from release payloads. Native archives must retain dependency license notices. Publishing
 the short name requires an authenticated owner account:
 
 ```sh
@@ -178,9 +177,9 @@ npm publish --access public --registry=https://registry.npmjs.org
 ```
 
 Complete any registry-required authentication interactively; do not put credentials
-in this repository, prompts or package files. The repository currently specifies
-`UNLICENSED` for the JavaScript wrapper instead of inventing a license for the app;
-native runtime dependency notices remain in each platform archive.
+in this repository, prompts or package files. StackBite first-party source and this wrapper use the
+[MIT License](../../LICENSE). Native runtime dependency notices remain in each
+platform archive. Existing registry tarballs are not changed by this source update.
 
 Archive hashes are checked during preparation; cached launches verify the selected
 native payload. `setup --check` verifies the full pinned runtime without downloading

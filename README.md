@@ -1,27 +1,13 @@
-# StackBite
+# Stackbite
 
 A local workspace for shells and agent CLIs, organized into Rooms and Seats.
 The app uses a Rust-native launcher, Room service, terminal owners and TUI.
+[한국어 안내](https://github.com/shinick-dev/stackbite/blob/main/README.ko.md)
 
 ## Install
 
-macOS / Linux:
-
-```sh
-curl -fsSL https://bitefoundry.dev/stackbite | sh
-```
-
-Windows PowerShell:
-
-```powershell
-irm https://bitefoundry.dev/stackbite/w | iex
-```
-
-Open a new terminal in your working folder and run `stackbite`.
-Native installation needs no Node.js, Python or WSL. Install and sign in to your
-chosen provider CLI separately.
-
-For Node.js 20+ users:
+Install [Node.js 20 or later](https://nodejs.org/en/download), then open a new
+terminal and run:
 
 ```sh
 npm install --global stackbite@latest
@@ -32,11 +18,13 @@ stackbite
 The npm package is a small launcher. `setup` downloads and verifies its pinned
 native bundle without opening the app; first launch also prepares it if needed.
 Later launches reuse the verified cache. `npx --yes stackbite@latest` also works.
+Install and sign in to your chosen provider CLI separately. You can also download
+and extract a native bundle and run its installer; that route needs no Node.js,
+Python or WSL. Keep the entire extracted archive together when using its installer.
 
-Native bundles in 0.5.118: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
-macOS 13+. Intel macOS is not included in this release; its last verified version is
-0.5.116 (`npm install --global stackbite@0.5.116`). Linux ARM and musl/Alpine bundles
-are not provided.
+Native bundles in 0.5.119: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
+and Intel macOS 13+. Linux ARM and musl/Alpine bundles are not provided.
+This core release omits the optional Phone runtime. See release notes for changes and validation scope.
 Download and extract the **entire** archive from
 [latest release](https://github.com/Shinick-Han/stackbite/releases/latest).
 
@@ -72,19 +60,11 @@ that every interrupted CLI resumes its prior conversation.
 ## Distribution
 
 This repository distributes installers, signed native release artifacts and the
-npm launcher. StackBite source and documentation are public under the
-[MIT License](https://github.com/shinick-dev/stackbite/blob/main/LICENSE) in
-[shinick-dev/stackbite](https://github.com/shinick-dev/stackbite). See release notes
-for actual platform validation and known limitations of each version. Published
-release: **0.5.118**.
+npm launcher. [StackBite source](https://github.com/shinick-dev/stackbite) is public
+and MIT-licensed; bundled dependencies retain their own licenses and notices. See release notes for the
+actual platform validation and known limitations of each version. Published
+release: **0.5.119**.
 
 ## Keyboard shortcuts
 
 Press `Ctrl+B`, then `?` for Help. Use `w` for a new Room, `c` for a new Seat, `f` to focus the list, and `q` to close the window while keeping Seats running. These letters follow `Ctrl+B`. Change direct bindings in Settings → Keyboard shortcuts.
-
-## Source and documentation
-
-Read the [current product guide](https://github.com/shinick-dev/stackbite#readme)
-and [documentation index](https://github.com/shinick-dev/stackbite/blob/main/docs/README.md).
-Third-party licenses and notices remain with their components. This source-license
-change does not replace existing release archives or registry tarballs.
