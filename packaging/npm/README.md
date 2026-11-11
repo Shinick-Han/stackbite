@@ -2,9 +2,12 @@
 
 Work Stack organizes the work. Stackbite gets it moving.
 
-Node.js 20 or newer is required. The portable runtime is available for Windows x64,
-Linux x64 with glibc 2.28 or newer, and Apple Silicon / Intel macOS 13 or newer.
-Intel Mac support starts with 0.5.115. Linux ARM and musl/Alpine builds are not supplied.
+Node.js 20 or newer is required. Release 0.5.117 supplies Windows x64,
+Linux x64 with glibc 2.28 or newer, and Apple Silicon macOS 13 or newer.
+Intel is excluded from 0.5.117; use `npm install --global stackbite@0.5.116`
+on Intel Macs. The 0.5.117 npm package has no Intel runtime pin; its current
+missing-pin error is generic, and automatic selection of an older qualified
+platform version is not implemented. Linux ARM and musl/Alpine builds are not supplied.
 Python installation and compilation are unnecessary. Archive extraction requires
 `tar` (included in macOS, current Windows and common Linux distributions).
 
@@ -62,7 +65,10 @@ preparation can be retried; an invalid existing runtime is reported and left in 
 
 Update a registry installation with `npm install --global stackbite@latest`.
 
-The launcher selects the archive using Node.js `process.arch`: `x64` selects Intel and `arm64` selects Apple Silicon using the matching reviewed pin. An x64 Node.js process under Rosetta selects the x64 archive; this does not establish Intel hardware qualification.
+The launcher uses Node.js `process.arch`: `arm64` selects the Apple Silicon pin;
+`x64` requires an Intel pin, which 0.5.117 does not contain. An x64 Node.js process
+under Rosetta also needs that Intel pin: use native arm64 Node.js for 0.5.117 on
+Apple Silicon. Rosetta execution is not native Intel hardware qualification.
 
 Use a native Node.js installation for your Mac architecture. Install and sign in to provider CLIs such
 as Codex or Claude separately. Stackbite can open without a provider login.

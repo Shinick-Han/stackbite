@@ -33,7 +33,7 @@ The npm package is a small launcher. `setup` downloads and verifies its pinned
 native bundle without opening the app; first launch also prepares it if needed.
 Later launches reuse the verified cache. `npx --yes stackbite@latest` also works.
 
-Native bundles in 0.5.117: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
+Native bundles in 0.5.118: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
 macOS 13+. Intel macOS is not included in this release; its last verified version is
 0.5.116 (`npm install --global stackbite@0.5.116`). Linux ARM and musl/Alpine bundles
 are not provided.
@@ -74,7 +74,7 @@ that every interrupted CLI resumes its prior conversation.
 This repository distributes installers, signed native release artifacts and the
 npm launcher. The core source repository is private. See release notes for the
 actual platform validation and known limitations of each version. Published
-release: **0.5.117**.
+release: **0.5.118**.
 
 ## Keyboard shortcuts
 

@@ -9,7 +9,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { main } = require('../lib/bootstrap');
-const { fixture, tar, zip, digest } = require('./fixtures');
+const { fixture, tar, zip, digest, zipExtract } = require('./fixtures');
 
 const INCARNATION = 'b'.repeat(32);
 const arch = platform => platform === 'darwin' ? 'arm64' : 'x64';
@@ -58,6 +58,8 @@ function options(platform, sample, base, overrides = {}) {
   const stages = [], calls = [];
   const value = { manifest: sample.manifest, platform, arch: arch(platform), glibcVersionRuntime: '2.28',
     environment: base.environment, cache: base.cache, progress: () => {},
+    // A Windows ZIP is extracted by Windows' native tar; other hosts stand in for that process only.
+    ...(platform === 'win32' ? { extractImpl: zipExtract() } : {}),
     async downloadImpl(spec, archive) { stages.push(path.dirname(archive)); await fs.writeFile(archive, sample.bytes); },
     spawnImpl(executable, args, spawnOptions) {
       calls.push({ executable, args, environment: spawnOptions.env });
@@ -258,4 +260,33 @@ test('a runtime that cannot start leaves no stage and reports the start failure'
     spawnImpl() { const child = new EventEmitter(); setImmediate(() => child.emit('error', new Error('ENOEXEC'))); return child; } });
   await assert.rejects(main(['uninstall'], run.value), /Cannot start the verified native Stackbite executable/);
   await assert.rejects(fs.lstat(run.stages[0]), { code: 'ENOENT' });
+});
+
+test('the ZIP stand-in extracts exactly the pinned members, as native tar does where it reads ZIP', async t => {
+  const area = await fs.mkdtemp(path.join(os.tmpdir(), 'stackbite-company46-'));
+  t.after(() => fs.rm(area, { recursive: true, force: true }));
+  const sample = fixture('win32'), archive = path.join(area, sample.pinned.asset);
+  const spec = require('../lib/bootstrap').releaseSpec(sample.manifest, 'win32', 'x64');
+  await fs.writeFile(archive, sample.bytes);
+  const trees = {};
+  for (const host of new Set(['linux', process.platform])) {
+    const destination = path.join(area, host);
+    await fs.mkdir(destination);
+    await zipExtract(host)(archive, destination, spec);
+    trees[host] = await snapshot(destination);
+  }
+  const files = Object.fromEntries(Object.entries(trees.linux).filter(([name]) => !name.endsWith('/')));
+  assert.deepEqual(files, Object.fromEntries(Object.entries(sample.files)
+    .map(([name, bytes]) => [sample.root + '/' + name, digest(bytes)]).sort(([a], [b]) => a < b ? -1 : 1)));
+  for (const tree of Object.values(trees)) assert.deepEqual(tree, trees.linux);
+  // The package refuses an escaping member before the stand-in is started; the stand-in itself never writes outside.
+  const escaping = rebuilt('win32', sample, records => records.push({ name: sample.root + '/../../planted', data: 'planted' }));
+  const hostile = path.join(area, 'hostile'), target = path.join(hostile, 'inner');
+  await fs.mkdir(target, { recursive: true });
+  await fs.writeFile(archive, escaping.bytes);
+  await assert.rejects(zipExtract('linux')(archive, target, { ...spec, sha256: escaping.manifest.platforms['win32-x64'].sha256 }),
+    /Unsafe archive path/);
+  const { zipTarStandIn } = require('./fixtures');
+  assert.equal(await new Promise(resolve => zipTarStandIn('tar', ['-xf', archive, '-C', target]).once('close', resolve)), 1);
+  assert.deepEqual(await fs.readdir(hostile), ['inner']);
 });

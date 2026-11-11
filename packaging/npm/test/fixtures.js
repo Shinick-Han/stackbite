@@ -91,4 +91,46 @@ async function publishFixture(payload, target, spec, { existing }) {
     else await fs.cp(payload, target, { recursive: true, errorOnExist: true, force: false });
   } catch (error) { if (!await exists(target)) throw error; }
 }
-module.exports = { COMMIT, digest, tar, zip, fixture, publishFixture };
+// GNU tar cannot read ZIP; only Windows' native bsdtar can. This stands in for
+// that one process on other hosts: it writes exactly the archive's members
+// under the destination, creates nothing else and exits 1 on any other input.
+function zipTarStandIn(executable, args) {
+  const { EventEmitter } = require('node:events'), fs = require('node:fs'), path = require('node:path');
+  const { inflateRawSync } = require('node:zlib');
+  const child = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  setImmediate(() => {
+    let code = 0;
+    try {
+      const destination = path.resolve(args[args.indexOf('-C') + 1]);
+      const bytes = fs.readFileSync(args[args.indexOf('-xf') + 1]);
+      const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+      let position = bytes.readUInt32LE(end + 16);
+      for (let count = bytes.readUInt16LE(end + 10); count > 0; count--) {
+        const nameSize = bytes.readUInt16LE(position + 28), local = bytes.readUInt32LE(position + 42);
+        const name = bytes.toString('utf8', position + 46, position + 46 + nameSize);
+        const target = path.resolve(destination, name);
+        if (!target.startsWith(destination + path.sep)) throw new Error('member outside the destination');
+        const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+        const data = bytes.subarray(start, start + bytes.readUInt32LE(position + 20));
+        if (name.endsWith('/')) fs.mkdirSync(target, { recursive: true });
+        else {
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, bytes.readUInt16LE(position + 10) === 8 ? inflateRawSync(data) : data, { flag: 'wx' });
+        }
+        position += 46 + nameSize + bytes.readUInt16LE(position + 30) + bytes.readUInt16LE(position + 32);
+      }
+    } catch { code = 1; }
+    child.emit('close', code);
+  });
+  return child;
+}
+// extractImpl for a simulated Windows release. The package's own ZIP parsing
+// and member validation always run; a Windows host also runs its native tar.
+function zipExtract(host = process.platform) {
+  const { extractArchive } = require('../lib/archive');
+  if (host === 'win32') return extractArchive;
+  return (archive, destination, spec) => extractArchive(archive, destination, spec, { spawnImpl: zipTarStandIn });
+}
+module.exports = { COMMIT, digest, tar, zip, fixture, publishFixture, zipTarStandIn, zipExtract };
