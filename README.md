@@ -1,4 +1,4 @@
-# Stackbite
+# StackBite
 
 A local workspace for shells and agent CLIs, organized into Rooms and Seats.
 The app uses a Rust-native launcher, Room service, terminal owners and TUI.
@@ -72,10 +72,19 @@ that every interrupted CLI resumes its prior conversation.
 ## Distribution
 
 This repository distributes installers, signed native release artifacts and the
-npm launcher. The core source repository is private. See release notes for the
-actual platform validation and known limitations of each version. Published
+npm launcher. StackBite source and documentation are public under the
+[MIT License](https://github.com/shinick-dev/stackbite/blob/main/LICENSE) in
+[shinick-dev/stackbite](https://github.com/shinick-dev/stackbite). See release notes
+for actual platform validation and known limitations of each version. Published
 release: **0.5.118**.
 
 ## Keyboard shortcuts
 
 Press `Ctrl+B`, then `?` for Help. Use `w` for a new Room, `c` for a new Seat, `f` to focus the list, and `q` to close the window while keeping Seats running. These letters follow `Ctrl+B`. Change direct bindings in Settings → Keyboard shortcuts.
+
+## Source and documentation
+
+Read the [current product guide](https://github.com/shinick-dev/stackbite#readme)
+and [documentation index](https://github.com/shinick-dev/stackbite/blob/main/docs/README.md).
+Third-party licenses and notices remain with their components. This source-license
+change does not replace existing release archives or registry tarballs.
