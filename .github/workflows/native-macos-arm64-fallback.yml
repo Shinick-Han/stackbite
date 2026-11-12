@@ -1,0 +1,43 @@
+name: StackBite native macOS arm64 fallback
+run-name: native-macos-arm64-fallback-${{ github.run_id }}
+# Manual only: one job on the standard public macos-15 (arm64) runner of the public distributor.
+# The PRODUCT is the frozen public source commit pinned in ci/native120-arm64/arm120-pins.json,
+# fetched credential-free into $RUNNER_TEMP/s120; the builder derives its identity from that
+# checkout's actual Git HEAD. This workflow's own commit (GITHUB_SHA) is the CI identity and is
+# recorded separately; the two are never equated. No secrets, signing keys or write permissions
+# are used; the archive stays unsigned. All logs, receipts and the archive go to
+# $RUNNER_TEMP/ci-out, uploaded even when a step fails.
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: stackbite-native-macos-arm64-fallback
+  cancel-in-progress: false
+jobs:
+  native-arm64:
+    if: github.repository == 'Shinick-Han/stackbite'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Native arm64 build, audits, runtime QA, lifecycle, trust, connect and ordinary PTY
+        run: bash ci/native120-arm64/arm120-job.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-macos-arm64-fallback-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-out
+          retention-days: 3
+          if-no-files-found: error
