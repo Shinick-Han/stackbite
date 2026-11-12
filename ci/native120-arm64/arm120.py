@@ -20,6 +20,9 @@ are not used; nothing is monkeypatched.
   arm120.py host --out FILE              native Darwin arm64, not translated
   arm120.py source --src DIR --out FILE  frozen source identity (HEAD/tree/clean/standalone/pinned files)
   arm120.py inputs --src --work --out    pinned 0.5.119 arm64 archive, core reuse + source pins, anchor file
+  arm120.py strip-probe --src --work --out --cargo --rustc --linker --sdk
+                                         early toolchain gate: llvm-tools host LLVM library, real rust-objcopy,
+                                         tiny strip=symbols release build in the builder's own environment
   arm120.py audit --src --work --out     package audit, archive extraction/verification, Mach-O arm64
   arm120.py runtime --src --work --out --qa Q   copy + check native-runtime-qa qualification.json
   arm120.py final --src --work --out --qa Q --job-exit N   collect existing evidence; never fabricates
@@ -44,7 +47,7 @@ MACHO_ARM64 = bytes.fromhex('cffaedfe0c000001')   # MH_MAGIC_64, CPU_TYPE_ARM64 
 MACHO_MAGICS = (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca')
 # The job script runs exactly these steps in this order (tests compare the script to this list).
 STEPS = ('ci', 'host', 'source-fetch', 'source', 'venv', 'anchor', 'inputs', 'toolchain-1.98.1', 'toolchain-1.85.1',
-         'preflight-0', 'preflight-1', 'rust', 'portable', 'audit', 'runtime-qa', 'runtime-check',
+         'llvm-tools-1.98.1', 'strip-probe', 'preflight-0', 'preflight-1', 'rust', 'portable', 'audit', 'runtime-qa', 'runtime-check',
          'lifecycle-single', 'lifecycle-update', 'provider-trust', 'connect-native-tests', 'ordinary', 'end-source')
 # Evidence files: (copied name in ci-out, source relative to the QA parent or None when a driver writes it in place).
 COLLECT = (('macos-arm64-runtime-qa.json', 'rq/qualification.json'),
@@ -53,12 +56,26 @@ COLLECT = (('macos-arm64-runtime-qa.json', 'rq/qualification.json'),
            ('macos-arm64-lifecycle-update.json', 'lu/result.json'),
            ('macos-arm64-ordinary-entry.json', 'rq/ordinary-entry-proof.json'),
            ('macos-arm64-ordinary-stages.jsonl', 'rq/ordinary-stages.jsonl'))
-REQUIRED = ('ci.json', 'host.json', 'source.json', 'inputs.json', 'audit.json', 'macos-arm64-rust-manifest.json',
+REQUIRED = ('ci.json', 'host.json', 'source.json', 'inputs.json', 'strip-probe.json', 'audit.json', 'macos-arm64-rust-manifest.json',
             'macos-arm64-bundle-manifest.json', 'macos-arm64-runtime-qa.json', 'runtime-check.json',
             'macos-arm64-lifecycle-single.json', 'macos-arm64-lifecycle-update.json',
             'macos-arm64-provider-trust.json', 'macos-arm64-provider-trust.test-adapter.json',
             'macos-arm64-connect-native-tests.json', 'macos-arm64-ordinary-entry.json', 'end-source.json')
 HEX40, HEX64 = re.compile('[0-9a-f]{40}').fullmatch, re.compile('[0-9a-f]{64}').fullmatch
+# Strip probe (rust-lang/rust#164063: rust-objcopy loads LLVM through an RPATH into the toolchain's host
+# lib directory, which only the official llvm-tools component populates; fixed by rust-lang/rust#164134).
+OTOOL, NM = '/usr/bin/otool', '/usr/bin/nm'
+PROBE = 'sb120-strip-probe'
+PROBE_MANIFEST = ('[package]\nname = "sb120-strip-probe"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n'
+                  '[workspace]\n\n[profile.release]\nstrip = "symbols"\n')
+PROBE_MAIN = ('#[inline(never)]\nfn sb120_probe_marker(value: u64) -> u64 {\n    value.wrapping_mul(31).rotate_left(7)\n}\n\n'
+              'fn main() {\n    let value = sb120_probe_marker(std::hint::black_box(6));\n'
+              '    println!("sb120-strip-probe {value}");\n}\n')
+PROBE_OUTPUT = 'sb120-strip-probe 23808'
+PROBE_MARKERS = ('sb120_probe_marker', 'sb120_strip_probe')
+# Any Cargo/rustc warning fails the probe even when Cargo exits 0 (rustc reports a failed strip as a warning).
+PROBE_WARNING = re.compile(r'^\s*warning\b|rust-objcopy|llvm-objcopy|library not loaded|dyld|sigabrt|abort', re.I | re.M)
+LLVM_DEPENDENCY = re.compile(r'^\s*@rpath/(libLLVM[A-Za-z0-9_.+-]*\.dylib)\s', re.M)
 
 
 class Refused(SystemExit):
@@ -293,6 +310,161 @@ def mode_inputs(args, pins):
                                                      bundle=str(bundle)), core=core))
 
 
+def tail(text, limit=4000):
+    return text if len(text) <= limit else '...' + text[-limit:]
+
+
+def recorded_run(record, run, argv, *, env, cwd, timeout=1800):
+    argv = [str(a) for a in argv]
+    row = dict(argv=argv, cwd=str(cwd))
+    record['commands'].append(row)
+    try:
+        result = run(argv, env=env, cwd=str(cwd), capture_output=True, text=True, encoding='utf-8', errors='replace',
+                     timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as error:
+        row['error'] = repr(error)
+        fail('strip probe command did not run', argv[0], error)
+    row.update(exit=result.returncode, stdout=tail(result.stdout or ''), stderr=tail(result.stderr or ''))
+    return result
+
+
+def same_path(a, b):
+    return os.path.normcase(os.path.realpath(str(a))) == os.path.normcase(os.path.realpath(str(b)))
+
+
+def strip_probe(*, src, work, out, pins, cargo, rustc, linker, sdk, intel, base, run=subprocess.run):
+    """Early toolchain gate before every expensive build; writes strip-probe.json (also on refusal) and never fabricates."""
+    record = dict(schema='stackbite.native120.arm64-strip-probe.v1', ok=False, toolchain=pins['toolchain'],
+                  target=pins['target'], deployment_target=pins['deployment_target'], commands=[])
+    try:
+        _strip_probe(record, src=src, work=work, pins=pins, cargo=cargo, rustc=rustc, linker=linker, sdk=sdk,
+                     intel=intel, base=dict(base), run=run)
+        record['ok'] = True
+    except Refused as refusal:
+        record['refused'] = str(refusal.code)
+        raise
+    finally:
+        write_json(pathlib.Path(out) / 'strip-probe.json', record)
+    return record
+
+
+def _strip_probe(record, *, src, work, pins, cargo, rustc, linker, sdk, intel, base, run):
+    tc, target = pins['toolchain'], pins['target']
+    src, work = pathlib.Path(src).resolve(strict=True), pathlib.Path(work).resolve(strict=True)
+    probe = work / 'strip-probe'
+    if probe.is_relative_to(src) or src.is_relative_to(probe):
+        fail('strip probe must stay outside the source checkout', probe)
+    if probe.exists() or probe.is_symlink():
+        fail('strip probe directory already exists', probe)
+    dyld = sorted(k for k in base if k.startswith('DYLD_'))
+    if dyld:
+        fail('the build environment must not carry dyld overrides', dyld)
+    # Provenance: the frozen clean checkout and the builder's own identity probe (commit time = epoch).
+    identity = source_identity(src, pins, intel)
+    builder = intel.load_builder(src)
+    probe_id = intel.builder_source_identity(builder, src, 'strip probe')
+    if (probe_id['commit'], probe_id['tree']) != (identity['commit'], identity['tree']):
+        fail('builder source identity differs from the checkout')
+    record['source'] = dict(commit=identity['commit'], tree=identity['tree'], epoch=probe_id['epoch'])
+    home = base.get('RUSTUP_HOME') or ''
+    if not os.path.isabs(home):
+        fail('RUSTUP_HOME must be the private absolute rustup home')
+    sysroot = pathlib.Path(home) / 'toolchains' / f'{tc}-{target}'
+    for tool, name in ((rustc, 'rustc'), (cargo, 'cargo')):
+        if not same_path(tool, sysroot / 'bin' / name):
+            fail(f'{name} is not the private {tc} toolchain binary', tool)
+    probe.mkdir()
+    project, target_dir = probe / 'project', probe / 'target'
+    (project / 'src').mkdir(parents=True)
+    (project / 'Cargo.toml').write_text(PROBE_MANIFEST, encoding='utf-8', newline='\n')
+    (project / 'src' / 'main.rs').write_text(PROBE_MAIN, encoding='utf-8', newline='\n')
+    # Exactly the builder's compiler environment (same base as the rust step), only its target dir is the probe's.
+    env = intel.builder_environment(builder, base, source=src, target_dir=target_dir, rustc=rustc,
+                                    commit=probe_id['commit'], version=pins['version'], target=target,
+                                    epoch=probe_id['epoch'], linker=linker, sdk=sdk,
+                                    deployment_target=pins['deployment_target'], anchor=pins['update_public_key'])
+    if any(k.startswith('DYLD_') for k in env) or not same_path(env.get('CARGO_TARGET_DIR', ''), target_dir):
+        fail('the builder environment is not the sanitized probe environment')
+    record['environment'] = dict(keys=sorted(env), sha256=sha256_bytes(json.dumps(sorted(env.items())).encode('utf-8')),
+                                 cargo_target_dir=str(target_dir))
+
+    vv = recorded_run(record, run, [rustc, '-vV'], env=env, cwd=probe)
+    info = dict(line.split(': ', 1) for line in (vv.stdout or '').splitlines() if ': ' in line)
+    if vv.returncode != 0 or info.get('release') != tc or info.get('host') != target:
+        fail('rustc is not the native', tc, target, 'compiler', info.get('release'), info.get('host'))
+    printed = recorded_run(record, run, [rustc, '--print', 'sysroot'], env=env, cwd=probe)
+    if printed.returncode != 0 or not same_path((printed.stdout or '').strip(), sysroot):
+        fail('rustc sysroot is not the private toolchain', (printed.stdout or '').strip())
+    # Check the Rust distribution's expected host lib path itself; rustup's exit status is not evidence.
+    host = sysroot / 'lib' / 'rustlib' / target
+    objcopy, host_lib = host / 'bin' / 'rust-objcopy', host / 'lib'
+    if objcopy.is_symlink() or not objcopy.is_file():
+        fail('the toolchain has no rust-objcopy', objcopy)
+    deps = recorded_run(record, run, [OTOOL, '-L', objcopy], env=env, cwd=probe)
+    names = sorted(set(LLVM_DEPENDENCY.findall(deps.stdout or '')))
+    if deps.returncode != 0 or len(names) != 1:
+        fail('rust-objcopy does not name exactly one @rpath LLVM library', names)
+    loads = recorded_run(record, run, [OTOOL, '-l', objcopy], env=env, cwd=probe)
+    lines = (loads.stdout or '').splitlines()
+    rpaths = [re.sub(r'\s+\(offset \d+\)\s*$', '', lines[i + 2].strip()[5:]) for i, line in enumerate(lines[:-2])
+              if line.strip() == 'cmd LC_RPATH' and lines[i + 2].strip().startswith('path ')]
+    resolved = [os.path.realpath(p.replace('@loader_path', str(objcopy.parent)).replace('@executable_path', str(objcopy.parent)))
+                for p in rpaths]
+    library = host_lib / names[0]
+    record['llvm'] = dict(rust_objcopy=str(objcopy), library_name=names[0], rpaths=rpaths, rpath_dirs=resolved,
+                          expected_library=str(library))
+    if loads.returncode != 0:
+        fail('otool could not read rust-objcopy load commands')
+    if library.is_symlink() or not library.is_file():
+        fail('llvm-tools host LLVM library is missing from the toolchain host lib directory', library)
+    real = library.resolve(strict=True)
+    with real.open('rb') as stream:
+        head = stream.read(8)
+    if not real.is_relative_to(sysroot.resolve(strict=True)) or head != MACHO_ARM64:
+        fail('host LLVM library is not a native arm64 Mach-O inside the toolchain', real)
+    first = next((d for d in resolved if os.path.exists(os.path.join(d, names[0]))), None)
+    if first is None or not same_path(first, host_lib):
+        fail('rust-objcopy RPATH does not resolve its LLVM library to the toolchain host lib directory', first)
+    record['llvm'].update(sha256=sha256(real), size=real.stat().st_size)
+    version = recorded_run(record, run, [objcopy, '--version'], env=env, cwd=probe, timeout=120)
+    if (version.returncode != 0 or 'LLVM version' not in (version.stdout or '')
+            or PROBE_WARNING.search(version.stderr or '')):
+        fail('rust-objcopy --version did not run cleanly', version.returncode, tail(version.stderr or '', 400))
+    # Tiny real release build with strip=symbols: any warning or nonzero exit stops the job here.
+    build = recorded_run(record, run, [cargo, 'build', '--manifest-path', project / 'Cargo.toml', '--release', '--offline',
+                                       '--target', target], env=env, cwd=project)
+    warnings = [line for line in ((build.stdout or '') + '\n' + (build.stderr or '')).splitlines() if PROBE_WARNING.search(line)]
+    if build.returncode != 0 or warnings:
+        fail('strip=symbols probe build failed or warned', build.returncode, warnings[:5])
+    binary = target_dir / target / 'release' / PROBE
+    if binary.is_symlink() or not binary.is_file():
+        fail('strip probe produced no binary', binary)
+    with binary.open('rb') as stream:
+        if stream.read(8) != MACHO_ARM64:
+            fail('strip probe binary is not a native arm64 Mach-O')
+    record['binary'] = dict(path=str(binary), sha256=sha256(binary), size=binary.stat().st_size)
+    ran = recorded_run(record, run, [binary], env=env, cwd=probe, timeout=60)
+    if ran.returncode != 0 or (ran.stdout or '').strip() != PROBE_OUTPUT:
+        fail('strip probe binary did not run natively', ran.returncode)
+    symbols = recorded_run(record, run, [NM, binary], env=env, cwd=probe, timeout=60)
+    if ((symbols.returncode != 0 and 'no symbols' not in (symbols.stderr or ''))
+            or any(m in (symbols.stdout or '') for m in PROBE_MARKERS)):
+        fail('strip probe binary still carries local symbols (not stripped)')
+    commands = recorded_run(record, run, [OTOOL, '-l', binary], env=env, cwd=probe, timeout=60)
+    minos = re.findall(r'^\s*minos\s+(\S+)\s*$', commands.stdout or '', re.M)
+    if commands.returncode != 0 or minos not in ([pins['deployment_target']], [pins['deployment_target'] + '.0']):
+        fail('strip probe binary minos differs from the deployment target', minos)
+    after = source_identity(src, pins, intel)
+    if (after['commit'], after['tree']) != (identity['commit'], identity['tree']):
+        fail('source identity changed during the strip probe')
+    record['source_after'] = dict(commit=after['commit'], tree=after['tree'], clean=after['clean'])
+
+
+def mode_strip_probe(args, pins):
+    strip_probe(src=args.src, work=args.work, out=args.out, pins=pins, cargo=args.cargo, rustc=args.rustc,
+                linker=args.linker, sdk=args.sdk, intel=load_intel(args.src, pins), base=os.environ)
+
+
 def macho_files(bundle):
     rows = {}
     for path in sorted(pathlib.Path(bundle).rglob('*')):
@@ -426,6 +598,9 @@ def main(argv=None):
         sub.add_parser(name).add_argument('--out', required=True)
     sub.add_parser('source').add_argument('--src', required=True)
     sub.choices['source'].add_argument('--out', required=True)
+    probe = sub.add_parser('strip-probe')
+    for option in ('--src', '--work', '--out', '--cargo', '--rustc', '--linker', '--sdk'):
+        probe.add_argument(option, required=True)
     for name in ('inputs', 'audit', 'runtime', 'end-source', 'final'):
         p = sub.add_parser(name)
         p.add_argument('--src', required=True)
@@ -437,7 +612,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     pins = load_pins()
     {'plan': mode_plan, 'pin': mode_pin, 'ci': mode_ci, 'host': mode_host, 'source': mode_source, 'inputs': mode_inputs,
-     'audit': mode_audit, 'runtime': mode_runtime, 'end-source': mode_end_source, 'final': mode_final}[args.mode](args, pins)
+     'strip-probe': mode_strip_probe, 'audit': mode_audit, 'runtime': mode_runtime, 'end-source': mode_end_source, 'final': mode_final}[args.mode](args, pins)
 
 
 if __name__ == '__main__':

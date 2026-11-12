@@ -125,8 +125,15 @@ C="$RUSTUP_HOME/toolchains/$TC-$TARGET/bin"
 M="$RUSTUP_HOME/toolchains/$MS-$TARGET/bin"
 step "toolchain-$TC" rustup toolchain install "$TC" --profile minimal
 step "toolchain-$MS" rustup toolchain install "$MS" --profile minimal
+# The minimal $TC profile's rust-objcopy loads LLVM via an RPATH into the host lib directory, which only the
+# official llvm-tools component provides (rust-lang/rust#164063, fix rust-lang/rust#164134). strip-probe then
+# checks that library path itself and runs rust-objcopy plus a tiny strip=symbols release build in the
+# builder's own environment, failing here, before any expensive build, on a missing library or any warning.
+step "llvm-tools-$TC" rustup component add --toolchain "$TC" llvm-tools
 export RUSTUP_AUTO_INSTALL=0
 cd "$SRC"
+step strip-probe vhelper strip-probe --src "$SRC" --work "$W" --out "$OUT" --cargo "$C/cargo" --rustc "$C/rustc" \
+  --linker "$CLANG" --sdk "$SDK"
 
 preflight() {
   RUSTC="$C/rustc" CARGO_TARGET_DIR="$W/preflight-target" "$C/cargo" test --manifest-path rust/Cargo.toml --locked \
