@@ -1,5 +1,5 @@
 'use strict';
-// Company46: an accepted removal journal saved before its capsule existed
+// An accepted removal journal saved before its capsule existed
 // (phase prepared, no recovery_command) and no cached runtime for this package.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

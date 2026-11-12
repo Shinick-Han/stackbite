@@ -78,7 +78,7 @@ is an alias). `stackbite uninstall` performs removal; add `--keep-data` to retai
 product data and hooks. Removal uses only an already cached
 verified runtime and never downloads one. The verified global Stackbite npm
 registration and command shims are removed. npm itself, unrelated packages, shared
-prefix directories and npx caches remain. Shared Helm/custom state is preserved.
+prefix directories and npx caches remain. Shared legacy and custom state is preserved.
 See [removal and recovery](../../docs/uninstall.md).
 
 ## Direct GitHub package
@@ -132,8 +132,7 @@ new owner are separate operations. Room/Seat definitions and saved history
 persist, but some provider conversations require manual resume and an owner
 change can replace generation/PID. See [updates and restart](../../docs/update.md)
 and [first use](../../docs/first-use.md).
-Global npm installation creates only the `stackbite` command; it does not claim an
-external `helm` command or replace independent Kubernetes tooling.
+Global npm installation creates only the `stackbite` command.
 
 ## Maintainer release steps
 
