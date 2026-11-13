@@ -1,5 +1,5 @@
 #!/bin/bash
-# ci/mac-tui/mac-tui-job.sh -- native macOS arm64 stackbite-terminal-tui --lib on the PRIVATE source.
+# ci/mac-tui/mac-tui-job.sh -- native macOS (ARM or Intel) stackbite-terminal-tui --lib on the PRIVATE source.
 # Modes:
 #   pins      validate ci/mac-tui/mac-tui-pins.json and write commit=R to $GITHUB_OUTPUT (no secret).
 #   run       use the already checked-out $GITHUB_WORKSPACE/.ci-private-source (this script never
@@ -13,7 +13,9 @@ umask 077
 export GIT_TERMINAL_PROMPT=0 LANG=en_US.UTF-8
 
 D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-PINS="$D/mac-tui-pins.json"
+PIN_FILE="${STACKBITE_MAC_TUI_PINS_FILE:-mac-tui-pins.json}"
+case "$PIN_FILE" in mac-tui-pins.json|mac-tui-pins-intel.json) ;; *) echo "stage=pins status=fail reason=pins_invalid"; exit 2;; esac
+PINS="$D/$PIN_FILE"
 EXPECTED_REPO="shinick-dev/stackbite"
 CHECKOUT_DIR=".ci-private-source"
 NFILTERS=4
@@ -29,7 +31,7 @@ RESULT = re.compile(r"test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d
 STAGES = ("setup", "pins", "private_checkout", "job", "host", "source", "credentials",
           "toolchain", "discovery", "focus", "full_lib", "done")
 REASONS = ("none", "output_dir_exists", "setup_failed", "pins_invalid", "pin_step_failed",
-           "private_checkout_failed", "job_not_completed", "host_not_arm64", "host_not_macos",
+           "private_checkout_failed", "job_not_completed", "host_not_arm64", "host_not_x86_64", "host_not_macos",
            "source_missing", "source_sha_mismatch", "source_layout", "source_dirty",
            "credential_config_present", "toolchain_install_failed", "build_failed",
            "discovery_empty", "focus_not_listed", "focus_failed", "focus_zero",
@@ -61,7 +63,7 @@ def pins_check(path, repo, checkout_dir, nfilters):
     ok = (d.get("schema") == PINS_SCHEMA and s.get("repository") == repo
           and s.get("visibility") == "private" and s.get("checkout_path") == checkout_dir
           and full(HEX40, s.get("commit")) and full(r"\d+\.\d+\.\d+", d.get("toolchain"))
-          and full(r"[a-z0-9-]{1,64}", d.get("package")) and d.get("expected_machine") == "arm64"
+          and full(r"[a-z0-9-]{1,64}", d.get("package")) and d.get("expected_machine") in ("arm64", "x86_64")
           and full(r"\d{1,3}", d.get("support_floor_macos")) and isinstance(fl, list)
           and len(fl) == n and len(set(fl)) == n
           and all(full(r"[A-Za-z0-9_]{1,128}", f) for f in fl))
@@ -266,7 +268,9 @@ def summary(pins_path, state_path, priv, pub):
         "focus": focus,
         "full_lib": counts_obj(os.path.join(priv, "full-lib.log")),
         "claims": {"native_arm64_tui_lib": status == "pass" and machine == "arm64",
-                   "macos_13": False, "intel": False, "release_qualification": False},
+                   "native_intel_tui_lib": status == "pass" and machine == "x86_64",
+                   "macos_13": False, "intel": status == "pass" and machine == "x86_64",
+                   "release_qualification": False},
         "private_diagnostics": "kept_on_runner_not_uploaded",
     }
     os.makedirs(pub, mode=0o700, exist_ok=True)
@@ -348,14 +352,16 @@ mode_run() {
   FILTERS="$(py pin "$PINS" required_filters)" || fail pins_invalid
   st commit "$COMMIT"; st toolchain "$TC"; st package "$PKG"; st support_floor "$FLOOR"
 
-  # 2. Native host proof: arm64 only; the macOS version is recorded against the 13 floor, never
-  #    claimed as 13, and nothing here is Intel evidence.
+  # 2. Native host proof: the pinned architecture only; the macOS version is recorded
+  #    against the 13 floor, never claimed as an actual macOS 13 execution.
   enter host
   MACHINE="$(uname -m)"
   MACOS="$(sw_vers -productVersion)"
   MACOS_BUILD="$(sw_vers -buildVersion)"
   st machine "$MACHINE"; st macos "$MACOS"; st macos_build "$MACOS_BUILD"
-  test "$MACHINE" = "$MACHINE_PIN" || fail host_not_arm64
+  if test "$MACHINE" != "$MACHINE_PIN"; then
+    case "$MACHINE_PIN" in arm64) fail host_not_arm64;; x86_64) fail host_not_x86_64;; esac
+  fi
   test -n "$MACOS" || fail host_not_macos
 
   # 3. The private source checked out by actions/checkout; HEAD must be exactly R.
