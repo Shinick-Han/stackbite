@@ -2,7 +2,7 @@
 
 A local workspace for shells and agent CLIs, organized into Rooms and Seats.
 The app uses a Rust-native launcher, Room service, terminal owners and TUI.
-[한국어 안내](https://github.com/shinick-dev/stackbite/blob/main/README.ko.md)
+[한국어 안내](README.ko.md)
 
 ## Install
 
@@ -60,8 +60,10 @@ that every interrupted CLI resumes its prior conversation.
 ## Distribution
 
 This repository distributes installers, signed native release artifacts and the
-npm launcher. [StackBite source](https://github.com/shinick-dev/stackbite) is public
-and MIT-licensed; bundled dependencies retain their own licenses and notices. See release notes for the
+npm launcher; the StackBite source repository is private. Releases through
+**0.5.121** were published under the [MIT License](LICENSE), while upcoming
+releases (**0.5.122+**) use proprietary distribution terms; bundled third-party
+dependencies retain their own licenses and notices. See release notes for the
 actual platform validation and known limitations of each version. Published
 release: **0.5.121**.
 

@@ -1,16 +1,5 @@
 name: StackBite native macOS arm64 0.5.121
 run-name: native-macos-arm64-121-${{ github.run_id }}
-# Manual only (workflow_dispatch, no inputs): ONE job on the standard public macos-15 (arm64) runner of
-# Shinick-Han/stackbite. Derived by derive121.py from the qualified 0.5.120 arm64 fallback workflow (distributor
-# 9fb18829, run 43243456196); the same ci/native121-macos harness bytes run in both lanes and
-# mac121-pins.json picks this one. The PRODUCT is the frozen public source commit R pinned in
-# ci/native121-macos/mac121-pins.json (bound by Root from runtime-source.json), fetched credential-free
-# into $RUNNER_TEMP/s121; the builder derives its identity from that checkout's actual Git HEAD.
-# This workflow's own commit (GITHUB_SHA) is the CI identity H and is recorded separately; H is
-# never claimed as R. No secrets, signing keys or write permissions are used; the archive stays
-# unsigned. No automatic retry, no push/PR/tag trigger. All logs, receipts and the archive go to
-# $RUNNER_TEMP/ci-out, uploaded even when a step fails. timeout-minutes 120 is a proposal pending
-# Root/user approval (measured 0.5.120 arm64 job: 43m31s; the Intel figure is an estimate).
 on:
   workflow_dispatch: {}
 permissions:
@@ -36,8 +25,31 @@ jobs:
         with:
           python-version: '3.12'
           architecture: arm64
+      - name: Stage ephemeral read-only deploy key for private source fetch
+        env:
+          STACKBITE_SOURCE_DEPLOY_KEY: ${{ secrets.STACKBITE_SOURCE_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "${STACKBITE_SOURCE_DEPLOY_KEY:-}" ]; then
+            echo "STACKBITE_SOURCE_DEPLOY_KEY secret is not configured" >&2
+            exit 1
+          fi
+          SSH_DIR="$RUNNER_TEMP/.sb-source-ssh"
+          rm -rf "$SSH_DIR"
+          mkdir -m 700 "$SSH_DIR"
+          printf '%s\n' "$STACKBITE_SOURCE_DEPLOY_KEY" > "$SSH_DIR/id_ed25519"
+          chmod 600 "$SSH_DIR/id_ed25519"
+          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$SSH_DIR/known_hosts"
+          chmod 600 "$SSH_DIR/known_hosts"
       - name: Native arm64 build, audits, runtime QA, lifecycle, trust, connect and ordinary PTY
+        env:
+          STACKBITE_MACOS_PINS: ci/native121-macos/mac121-pins.json
         run: bash ci/native121-macos/mac121-job.sh
+      - name: Purge private source, logs, intermediate build artifacts, and SSH state
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/.sb-source-ssh" "$RUNNER_TEMP/s121" "$RUNNER_TEMP/ci-logs" "$RUNNER_TEMP/w" "$RUNNER_TEMP/sb121-build-venv"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

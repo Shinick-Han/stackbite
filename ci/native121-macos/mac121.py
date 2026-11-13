@@ -45,25 +45,32 @@ SCHEMA = 'stackbite.native121.macos-pins.v1'
 RESULT_SCHEMA = 'stackbite.native121.macos-result.v1'
 HARNESS = 'ci/native121-macos'
 VERSION, BASELINE = '0.5.121', '0.5.120'
-# One harness, two lanes. Everything lane-specific is fixed here and must equal the pins.
 LANES = {
     'macos-arm64': dict(target='aarch64-apple-darwin', runner='macos-15', ci_repository='Shinick-Han/stackbite',
                         workflow='.github/workflows/native-macos-arm64-fallback.yml', machine='arm64',
-                        reviewed='mac-reviewed-pins-aarch64.json', macho='cffaedfe0c000001',   # CPU_TYPE_ARM64
-                        requirements='requirements-build.txt'),
-    'macos-x86_64': dict(target='x86_64-apple-darwin', runner='macos-15-intel', ci_repository='shinick-dev/stackbite',
+                        pins='mac121-pins.json', reviewed='mac-reviewed-pins-aarch64.json',
+                        macho='cffaedfe0c000001', requirements='requirements-build.txt'),
+    'macos-x86_64': dict(target='x86_64-apple-darwin', runner='macos-15-intel', ci_repository='Shinick-Han/stackbite',
                          workflow='.github/workflows/native-macos-intel.yml', machine='x86_64',
-                         reviewed='mac-reviewed-pins-x86_64.json', macho='cffaedfe07000001',   # CPU_TYPE_X86_64
-                         # cryptography 50.x has no x86_64 macOS wheel: the source's reviewed Intel pin (48.0.1)
-                         requirements='ci/native120/requirements-intel-build.txt'),
+                         pins='mac121-pins-x86_64.json', reviewed='mac-reviewed-pins-x86_64.json',
+                         macho='cffaedfe07000001', requirements='ci/native120/requirements-intel-build.txt'),
 }
-SHARED = ('mac121.py', 'mac121-job.sh', 'mac121-pins.json', 'drivers/package-native-trust-adapted.py',
+SHARED = ('mac121.py', 'mac121-job.sh', 'drivers/package-native-trust-adapted.py',
           'drivers/connect-native-qa121.py', 'drivers/ordinary-posix121.py')
+
+
+def pins_path():
+    override = os.environ.get('STACKBITE_MACOS_PINS')
+    if not override:
+        return PINS
+    candidate = pathlib.Path(override)
+    return candidate if candidate.is_absolute() else (HERE.parent.parent / candidate)
 
 
 def published(pins):
     lane = LANES[pins['platform']]
-    return (lane['workflow'], *(f'{HARNESS}/{name}' for name in SHARED), f"{HARNESS}/{lane['reviewed']}")
+    return (lane['workflow'], *(f'{HARNESS}/{name}' for name in SHARED),
+            f"{HARNESS}/{lane['pins']}", f"{HARNESS}/{lane['reviewed']}")
 
 
 def macho_magic(pins):
@@ -82,13 +89,11 @@ MACHO_MAGICS = (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b
 STEPS = ('ci', 'host', 'source-fetch', 'source', 'venv', 'anchor', 'inputs', 'toolchain-1.98.1', 'toolchain-1.85.1',
          'llvm-tools-1.98.1', 'strip-probe', 'preflight-0', 'preflight-1', 'rust', 'portable', 'audit', 'runtime-qa', 'runtime-check',
          'lifecycle-single', 'lifecycle-update', 'provider-trust', 'connect-native-tests', 'ordinary', 'end-source')
-# Evidence files: (copied name in ci-out, '{platform}' = pins platform; source relative to the QA parent).
 COLLECT = (('{platform}-runtime-qa.json', 'rq/qualification.json'),
-           ('{platform}-runtime-qa-failure.json', 'rq/failure.json'),
            ('{platform}-lifecycle-single.json', 'ls/result.json'),
            ('{platform}-lifecycle-update.json', 'lu/result.json'),
-           ('{platform}-ordinary-entry.json', 'rq/ordinary-entry-proof.json'),
-           ('{platform}-ordinary-stages.jsonl', 'rq/ordinary-stages.jsonl'))
+           ('{platform}-ordinary-entry.json', 'rq/ordinary-entry-proof.json'))
+FORBIDDEN_OUT_SUFFIXES = ('.log', '.rs', '.c', '.h', '.zig', '.py', '.sh', '.dsym', '.o', '.rlib', '.rmeta', '.pdb', '.pem', '.key')
 REQUIRED = ('ci.json', 'host.json', 'source.json', 'inputs.json', 'strip-probe.json', 'preflight-0.json',
             'preflight-1.json', 'audit.json', '{platform}-rust-manifest.json',
             '{platform}-bundle-manifest.json', '{platform}-runtime-qa.json', 'runtime-check.json',
@@ -140,8 +145,8 @@ def write_json(path, document, exclusive=True):
         stream.write(json.dumps(document, indent=2) + '\n')
 
 
-def load_pins(path=PINS):
-    pins = json.loads(pathlib.Path(path).read_text(encoding='utf-8'))
+def load_pins(path=None):
+    pins = json.loads(pathlib.Path(path or pins_path()).read_text(encoding='utf-8'))
     old, core, src = pins.get('old120') or {}, pins.get('core') or {}, pins.get('source') or {}
     rev = pins.get('macos_reviewed_pins_file') or {}
     bins = pins.get('bins') or []
@@ -684,7 +689,15 @@ def final_document(*, pins, out, steps, job_exit, ci, source_end, copied):
                 baseline_version=pins['baseline_version'], baseline_archive=pins['old120']['name'], ci_workflow=pins['workflow'],
                 runner=host, archive=audit.get('archive'), steps=steps, expected_steps=list(STEPS),
                 failed_steps=[s.get('step') for s in failed], missing_receipts=missing, collected=copied, receipts=receipts,
-                signed=False, published=False, private_key_used=False, secrets_used=False)
+                signed=False, published=False, private_key_used=False, secrets_used=True,
+                source_auth='ssh-deploy-key', public_logs_isolated=True)
+
+
+def verify_public_artifact_dir(out):
+    leaked = [p.relative_to(out).as_posix() for p in sorted(pathlib.Path(out).rglob('*'))
+              if p.name.lower().endswith(FORBIDDEN_OUT_SUFFIXES) or '.dsym/' in p.as_posix().lower()]
+    if leaked:
+        fail('public artifact directory contains forbidden source, log, symbol, or key path', leaked[:10])
 
 
 def mode_final(args, pins):
@@ -692,6 +705,7 @@ def mode_final(args, pins):
     if not out.is_dir():
         fail('no job output directory')
     copied = collect(out, args.qa, pins['platform'])
+    verify_public_artifact_dir(out)
     ci = json.loads((out / 'ci.json').read_text(encoding='utf-8')) if (out / 'ci.json').is_file() else None
     end = json.loads((out / 'end-source.json').read_text(encoding='utf-8')) if (out / 'end-source.json').is_file() else None
     doc = final_document(pins=pins, out=out, steps=read_steps(out), job_exit=args.job_exit, ci=ci, source_end=end, copied=copied)

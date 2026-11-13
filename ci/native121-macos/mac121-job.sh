@@ -9,28 +9,30 @@
 # mac121-final.json. Never fabricates. Test counts are discovered on this runner, never constants.
 set -euo pipefail
 umask 077
-export GIT_TERMINAL_PROMPT=0 LANG=en_US.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1
+export GIT_TERMINAL_PROMPT=0 LANG=en_US.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 RUST_BACKTRACE=0
 D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BASE_PY="$(command -v python)"
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 OUT="$RUNNER_TEMP/ci-out"
+LOGS="$RUNNER_TEMP/ci-logs"
 W="$RUNNER_TEMP/w"
 SRC="$RUNNER_TEMP/s121"
 VENV="$RUNNER_TEMP/sb121-build-venv"
 PY="$VENV/bin/python"
 Q=""
-helper() { "$BASE_PY" -I -B "$D/mac121.py" "$@"; }        # stdlib only: before the venv exists and in the EXIT trap
-vhelper() { "$PY" -I -B "$D/mac121.py" "$@"; }             # the build venv: modes that load the source builder
+helper() { "$BASE_PY" -I -B "$D/mac121.py" "$@"; }
+vhelper() { "$PY" -I -B "$D/mac121.py" "$@"; }
 
-test ! -e "$OUT" && test ! -e "$W" && test ! -e "$SRC" && test ! -e "$VENV"
-mkdir -m 700 "$OUT" "$W"
+test ! -e "$OUT" && test ! -e "$LOGS" && test ! -e "$W" && test ! -e "$SRC" && test ! -e "$VENV"
+mkdir -m 700 "$OUT" "$LOGS" "$W"
 
 finish() {
   code=$?
   set +e
-  helper final --src "$SRC" --work "$W" --out "$OUT" --qa "$Q" --job-exit "$code" > "$OUT/final.log" 2>&1
+  rm -rf "$RUNNER_TEMP/.sb-source-ssh"
+  helper final --src "$SRC" --work "$W" --out "$OUT" --qa "$Q" --job-exit "$code" > "$LOGS/final.log" 2>&1
   final=$?
-  cat "$OUT/final.log"
+  cat "$LOGS/final.log"
   if [ "$code" = 0 ]; then code=$final; fi
   exit "$code"
 }
@@ -40,15 +42,14 @@ step() {
   local name="$1" started=$SECONDS code=0
   shift
   printf 'Starting %s\n' "$name"
-  # A plain subshell (not inside ||/&&/if) keeps errexit effective inside step functions.
   set +e
-  ( set -euo pipefail; "$@" ) > "$OUT/$name.log" 2>&1
+  ( set -euo pipefail; "$@" ) > "$LOGS/$name.log" 2>&1
   code=$?
   set -e
   printf '{"step":"%s","exit":%d,"seconds":%d}\n' "$name" "$code" "$((SECONDS - started))" >> "$OUT/steps.jsonl"
   printf 'Finished %s: exit %d in %ds\n' "$name" "$code" "$((SECONDS - started))"
   if [ "$code" != 0 ]; then
-    tail -n 120 "$OUT/$name.log" >&2 || true
+    printf 'Step %s failed (exit %d); raw build and test logs withheld on public runner\n' "$name" "$code" >&2
     exit "$code"
   fi
 }
@@ -71,9 +72,14 @@ step ci helper ci --out "$OUT/ci.json"
 step host helper host --out "$OUT/host.json"
 
 fetch_source() {
+  local ssh_dir="$RUNNER_TEMP/.sb-source-ssh"
+  trap 'rm -rf "$RUNNER_TEMP/.sb-source-ssh"' RETURN
+  test -f "$ssh_dir/id_ed25519" && test -f "$ssh_dir/known_hosts"
   git init -q "$SRC"
-  git -C "$SRC" -c credential.helper= -c protocol.version=2 fetch --no-tags --depth=1 \
-    "https://github.com/$SOURCE_REPO.git" "$SOURCE_COMMIT"
+  GIT_SSH_COMMAND="ssh -i $ssh_dir/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o BatchMode=yes" \
+    git -C "$SRC" -c credential.helper= -c protocol.version=2 fetch --no-tags --depth=1 \
+    "ssh://git@github.com/$SOURCE_REPO.git" "$SOURCE_COMMIT"
+  rm -rf "$ssh_dir"
   git -C "$SRC" -c advice.detachedHead=false checkout -q --detach "$SOURCE_COMMIT"
   git -C "$SRC" rev-parse HEAD 'HEAD^{tree}'
 }
@@ -178,9 +184,20 @@ step lifecycle-single "$PY" -B "$SRC/scripts/qa/lifecycle_regression.py" --bundl
   --expect-commit "$SOURCE_COMMIT" --expect-version "$VERSION"
 step lifecycle-update "$PY" -B "$SRC/scripts/qa/lifecycle_regression.py" --bundle "$BUNDLE" --qa-root "$Q/lu" \
   --expect-commit "$SOURCE_COMMIT" --expect-version "$VERSION" --old-bundle "$W/old120/$OLD_TOP"
-step provider-trust "$PY" -B "$D/drivers/package-native-trust-adapted.py" --source "$SRC" --package "$BUNDLE" \
-  --cargo "$C/cargo" --rustc "$C/rustc" --target-dir "$W/rust-cache" --receipt "$OUT/$PLATFORM-provider-trust.json"
-step connect-native-tests "$PY" -B "$D/drivers/connect-native-qa121.py" --source "$SRC" --package "$BUNDLE" \
-  --cache "$W/rust-cache" --cargo "$C/cargo" --rustc "$C/rustc" --receipt "$OUT/$PLATFORM-connect-native-tests.json"
+run_provider_trust() {
+  "$PY" -B "$D/drivers/package-native-trust-adapted.py" --source "$SRC" --package "$BUNDLE" \
+    --cargo "$C/cargo" --rustc "$C/rustc" --target-dir "$W/rust-cache" --receipt "$LOGS/$PLATFORM-provider-trust.json"
+  cp "$LOGS/$PLATFORM-provider-trust.json" "$OUT/$PLATFORM-provider-trust.json"
+  cp "$LOGS/$PLATFORM-provider-trust.test-adapter.json" "$OUT/$PLATFORM-provider-trust.test-adapter.json"
+}
+
+run_connect_native_tests() {
+  "$PY" -B "$D/drivers/connect-native-qa121.py" --source "$SRC" --package "$BUNDLE" \
+    --cache "$W/rust-cache" --cargo "$C/cargo" --rustc "$C/rustc" --receipt "$LOGS/$PLATFORM-connect-native-tests.json"
+  cp "$LOGS/$PLATFORM-connect-native-tests.json" "$OUT/$PLATFORM-connect-native-tests.json"
+}
+
+step provider-trust run_provider_trust
+step connect-native-tests run_connect_native_tests
 step ordinary "$PY" -B "$D/drivers/ordinary-posix121.py" "$Q/rq"
 step end-source vhelper end-source --src "$SRC" --work "$W" --out "$OUT"
