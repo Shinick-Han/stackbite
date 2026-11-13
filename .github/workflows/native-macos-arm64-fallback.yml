@@ -1,7 +1,7 @@
 name: StackBite macOS arm64 TUI lib qualification (T01, private source)
 run-name: macos-tui-lib-${{ github.run_id }}
 # DRAFT for .github/workflows/native-macos-arm64-fallback.yml. Manual only: ONE job on the standard
-# public macos-15 (arm64) runner, no automatic retry, no push/PR/tag trigger, no user inputs.
+# public macos-26 (arm64) runner, no automatic retry, no push/PR/tag trigger, no user inputs.
 # PRODUCT = private shinick-dev/stackbite at the commit pinned in ci/mac-tui/mac-tui-pins.json,
 # checked out read-only by the pinned actions/checkout with the deploy key passed ONLY as its
 # ssh-key input (persist-credentials false). This workflow's own commit is the CI identity H,
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   tui-lib-arm64:
     if: github.repository == 'Shinick-Han/stackbite'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -48,6 +48,9 @@ jobs:
           PIN_OUTCOME: ${{ steps.pin.outcome }}
           CHECKOUT_OUTCOME: ${{ steps.private.outcome }}
         run: bash ci/mac-tui/mac-tui-job.sh finalize
+      - name: Seal private diagnostics for local decryption
+        if: always()
+        run: bash ci/mac-tui/seal-diagnostics.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

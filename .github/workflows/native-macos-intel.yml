@@ -50,6 +50,9 @@ jobs:
           PIN_OUTCOME: ${{ steps.pin.outcome }}
           CHECKOUT_OUTCOME: ${{ steps.private.outcome }}
         run: bash ci/mac-tui/mac-tui-job.sh finalize
+      - name: Seal private diagnostics for local decryption
+        if: always()
+        run: bash ci/mac-tui/seal-diagnostics.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

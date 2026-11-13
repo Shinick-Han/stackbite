@@ -84,17 +84,19 @@ def result_counts(path):
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return None
-    lines = bad = 0
-    s = [0, 0, 0, 0, 0]
+    # One --lib target: subprocess test harness output may contain nested summaries.
+    # The final libtest result is the parent binary, not the sum of child reports.
+    lines = 0
+    last = None
+    bad = 0
     with f:
         for line in f:
             m = RESULT.match(line.rstrip("\r\n"))
             if m:
                 lines += 1
-                bad += m.group(1) != "ok"
-                for i in range(5):
-                    s[i] += int(m.group(i + 2))
-    return [lines, bad] + s
+                bad = int(m.group(1) != "ok")
+                last = [int(m.group(i + 2)) for i in range(5)]
+    return [lines, bad] + last if last is not None else None
 
 
 def results(path):
@@ -207,7 +209,7 @@ def counts_obj(path):
     c = result_counts(path)
     if c is None:
         return None
-    keys = ("result_lines", "failed_result_lines", "passed", "failed", "ignored", "measured",
+    keys = ("result_lines_seen", "last_result_failed", "passed", "failed", "ignored", "measured",
             "filtered_out")
     return dict(zip(keys, c))
 
@@ -235,6 +237,7 @@ def summary(pins_path, state_path, priv, pub):
     focus = []
     for i, name in enumerate(filters, 1):
         focus.append({"filter": name, "listed": num("focus_listed_%d" % i),
+                      "cargo_exit_code": num("focus_cargo_exit_%d" % i),
                       "result": counts_obj(os.path.join(priv, "focus-%d.log" % i))})
     out = {
         "schema": SUMMARY_SCHEMA,
@@ -267,6 +270,8 @@ def summary(pins_path, state_path, priv, pub):
                       "listed_ignored": listed_count(os.path.join(priv, "ignored.txt"))},
         "focus": focus,
         "full_lib": counts_obj(os.path.join(priv, "full-lib.log")),
+        "full_lib_cargo_exit_code": num("full_lib_cargo_exit"),
+        "count_basis": "final_parent_libtest_result",
         "claims": {"native_arm64_tui_lib": status == "pass" and machine == "arm64",
                    "native_intel_tui_lib": status == "pass" and machine == "x86_64",
                    "macos_13": False, "intel": status == "pass" and machine == "x86_64",
@@ -419,6 +424,7 @@ mode_run() {
     test "$N" -gt 0 || fail focus_not_listed
     "${C[@]}" -- "$F" < /dev/null > "$PRIV/focus-$I.log" 2>&1
     FRC=$?
+    st "focus_cargo_exit_$I" "$FRC"
     read -r RL RB RP RF RI RM RFO <<< "$(py results "$PRIV/focus-$I.log")"
     { test "$FRC" -eq 0 && test "$RB" -eq 0 && test "$RF" -eq 0; } || fail focus_failed
     { test "$RL" -ge 1 && test "$RP" -ge 1; } || fail focus_zero
@@ -429,6 +435,7 @@ mode_run() {
   enter full_lib
   "${C[@]}" < /dev/null > "$PRIV/full-lib.log" 2>&1
   FRC=$?
+  st full_lib_cargo_exit "$FRC"
   read -r RL RB RP RF RI RM RFO <<< "$(py results "$PRIV/full-lib.log")"
   { test "$FRC" -eq 0 && test "$RB" -eq 0 && test "$RF" -eq 0; } || fail full_lib_failed
   { test "$RL" -ge 1 && test "$RP" -ge 1; } || fail full_lib_zero
