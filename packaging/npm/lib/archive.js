@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('node:fs/promises');
 const { createReadStream, createWriteStream } = require('node:fs');
-const { createGunzip, createInflateRaw } = require('node:zlib');
+const { createGunzip, createInflateRaw, crc32: zlibCrc32 } = require('node:zlib');
 const { Transform, Writable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { spawn } = require('node:child_process');
@@ -12,6 +12,14 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
   return value >>> 0;
 });
+// CRC-32 of `bytes` continued from the CRC-32 `crc` of the bytes before them (0 at the start).
+function tableCrc32(bytes, crc = 0) {
+  crc = ~crc;
+  for (const byte of bytes) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 255];
+  return ~crc >>> 0;
+}
+// zlib's native routine has the same contract; Node before 20.15/22.2 lacks it and keeps the table loop.
+const crc32 = typeof zlibCrc32 === 'function' ? zlibCrc32 : tableCrc32;
 
 async function readAt(file, offset, length) {
   const bytes = Buffer.alloc(length);
@@ -117,11 +125,11 @@ async function zipLocalHeader(file, record, directoryOffset) {
   return { dataStart, extraStart: localOffset + 30 + localNameSize, extraSize: localExtraSize };
 }
 function zipDigest(expanded) {
-  const digest = { size: 0, crc: 0xffffffff };
+  const digest = { size: 0, crc: 0 };
   digest.sink = new Writable({ write(chunk, encoding, callback) {
     digest.size += chunk.length;
     if (digest.size > expanded) return callback(new Error('ZIP expansion exceeds declared size'));
-    for (const byte of chunk) digest.crc = (digest.crc >>> 8) ^ crcTable[(digest.crc ^ byte) & 255];
+    digest.crc = crc32(chunk, digest.crc);
     callback();
   } });
   return digest;
@@ -136,7 +144,7 @@ async function zipContent(archive, { method, compressed, expanded, crc }, dataSt
     if (method === 8) await pipeline(input, createInflateRaw(), digest.sink, { signal });
     else await pipeline(input, digest.sink, { signal });
   }
-  if (digest.size !== expanded || ((digest.crc ^ 0xffffffff) >>> 0) !== crc) fail('ZIP content size/CRC mismatch');
+  if (digest.size !== expanded || digest.crc !== crc) fail('ZIP content size/CRC mismatch');
 }
 // Reject Unicode-path/ZIP64 extra fields: native tar must use the same name
 // and sizes checked here, without a second interpretation of this entry.
@@ -288,4 +296,4 @@ async function extractArchive(archive, destination, spec, { spawnImpl = spawn } 
   });
   return entries;
 }
-module.exports = { validateEntries, zipEntries, tarEntries, extractArchive, nativeTar };
+module.exports = { validateEntries, zipEntries, tarEntries, extractArchive, nativeTar, tableCrc32 };

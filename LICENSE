@@ -1,21 +1,37 @@
-MIT License
+StackBite License
 
-Copyright (c) 2026 BiteFoundry
+Copyright (c) 2026 BiteFoundry. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This license applies to StackBite version 0.5.122 and later: the first-party
+StackBite source code, documentation and the binaries built from them (the
+"Software"). It does not apply to third-party components.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Use grant. BiteFoundry grants you a non-exclusive, non-transferable,
+   royalty-free license to install and run unmodified binary releases of the
+   Software distributed by BiteFoundry, for personal use and for internal
+   business use, including commercial internal use. No fee is charged under
+   this license.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Reserved rights. Except as expressly granted above, or with separate written
+   permission from BiteFoundry, you may not modify, adapt or create derivative
+   works of the first-party source code, and you may not publish, distribute,
+   redistribute, sublicense or sell the Software or its source code. All rights
+   not expressly granted are reserved.
+
+3. Earlier MIT releases. StackBite versions 0.5.121 and earlier that were
+   published under the MIT License remain under the MIT License for those
+   copies. This license does not revoke, limit or replace any rights granted
+   for those MIT-licensed copies.
+
+4. Third-party components. Third-party components keep their own licenses and
+   copyright notices, which accompany them. Nothing in this license limits the
+   rights those licenses grant you. This license grants no rights to
+   third-party trademarks, provider services or credentials.
+
+5. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+   EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.

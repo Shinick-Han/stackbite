@@ -2,7 +2,6 @@
 
 A local workspace for shells and agent CLIs, organized into Rooms and Seats.
 The app uses a Rust-native launcher, Room service, terminal owners and TUI.
-[한국어 안내](README.ko.md)
 
 ## Install
 
@@ -22,7 +21,7 @@ Install and sign in to your chosen provider CLI separately. You can also downloa
 and extract a native bundle and run its installer; that route needs no Node.js,
 Python or WSL. Keep the entire extracted archive together when using its installer.
 
-Native bundles in 0.5.121: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
+Native bundles in 0.5.122: Windows x64, Linux x86_64 with GLIBC 2.28+, and Apple Silicon
 and Intel macOS 13+. Linux ARM and musl/Alpine bundles are not provided.
 This core release omits the optional Phone runtime. See release notes for changes and validation scope.
 Download and extract the **entire** archive from
@@ -60,12 +59,11 @@ that every interrupted CLI resumes its prior conversation.
 ## Distribution
 
 This repository distributes installers, signed native release artifacts and the
-npm launcher; the StackBite source repository is private. Releases through
-**0.5.121** were published under the [MIT License](LICENSE), while upcoming
-releases (**0.5.122+**) use proprietary distribution terms; bundled third-party
-dependencies retain their own licenses and notices. See release notes for the
+npm launcher. StackBite 0.5.122 and later are licensed under the StackBite License
+(see LICENSE); the first-party source is private. Releases 0.5.121 and earlier keep
+their MIT License. Bundled dependencies retain their own licenses and notices. See release notes for the
 actual platform validation and known limitations of each version. Published
-release: **0.5.121**.
+release: **0.5.122**.
 
 ## Keyboard shortcuts
 

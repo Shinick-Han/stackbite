@@ -393,7 +393,7 @@ async function resumeWithoutRuntime(argv, environment, launch, options = {}) {
   const journal = path.join(root, '.stackbite-uninstall.json');
   const record = await readRemovalJournal(journal);
   if (record === undefined) return null;
-  if (record.schema !== 'stackbite.uninstall.v1' || !record.accepted || !record.processes_settled
+  if (record.schema !== 'stackbite.uninstall.v1' || !record.accepted || !processesDone(record)
       || record.install_identity?.root !== root) return null;
   // The capsule takes the existing installation/removal locks and owns all
   // journal mutation, including npm settlement. This reader never rewrites it.
@@ -406,6 +406,36 @@ async function resumeWithoutRuntime(argv, environment, launch, options = {}) {
   }
   if (platform !== 'win32') await assertShellCapsule(record, journal);
   return launch(selected[0], selected.slice(1), environment, options);
+}
+
+// The one finalize-eligibility contract (the Rust controller's
+// `uninstall_controller::processes_done`, the POSIX cleanup capsule and the
+// npm bootstrap read the same): every selected state settled, or
+// `processes_released` over a validated R4 waiver record. A waiver never sets
+// `processes_settled`. Structure only; the hash is not recomputed.
+function processesDone(record) {
+  return record.processes_settled === true
+    || (record.processes_released === true && waivedDebt(record.waived_recovery_members));
+}
+
+function waivedDebt(waived) {
+  if (!waived || typeof waived !== 'object' || Array.isArray(waived)) return false;
+  let entries = 0;
+  for (const list of Object.values(waived)) {
+    if (!Array.isArray(list) || !list.every(waiverEntry)) return false;
+    entries += list.length;
+  }
+  return entries > 0;
+}
+
+function waiverEntry(entry) {
+  return !!entry && typeof entry === 'object' && !Array.isArray(entry)
+    && entry.bytes !== undefined && entry.bytes !== null
+    && typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256)
+    && Array.isArray(entry.waived) && entry.waived.length > 0
+    && entry.waived.every(name => typeof name === 'string')
+    && !!entry.report && typeof entry.report === 'object' && !Array.isArray(entry.report)
+    && entry.signalled === false;
 }
 
 // The parsed journal; undefined when there is none.
@@ -471,4 +501,4 @@ async function assertSourceCleanupPins(pins) {
   }
 }
 
-module.exports = { registration, npmProgram, removeRegistration, explicitApply, descriptor, resumeWithoutRuntime, registrationOnly, ownCommandLink };
+module.exports = { registration, npmProgram, removeRegistration, explicitApply, descriptor, resumeWithoutRuntime, registrationOnly, ownCommandLink, processesDone };

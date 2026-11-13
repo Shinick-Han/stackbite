@@ -1,10 +1,11 @@
 'use strict';
 const fs = require('node:fs/promises');
+const { readdirSync, lstatSync, realpathSync } = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists } = require('./common');
+const { LIMITS, fail, memberPath, inside, hashFile, hashFileSync, readSmall, exists } = require('./common');
 const { download } = require('./download');
 const { extractArchive } = require('./archive');
 const { cacheDirectory, existingCacheDirectory, resolveCacheDirectory } = require('./cache');
@@ -71,57 +72,44 @@ function expectedMembers(hashes) {
   if (!expected.has('portable.json') || !expected.has('runtime/build-info.json')) fail('Required release metadata is missing');
   return expected;
 }
-// Runs at most `limit` tasks at once; queued tasks start in submission order.
-function boundedRunner(limit) {
-  let active = 0;
-  const queue = [];
-  function next() {
-    if (active >= limit || !queue.length) return;
-    const { task, resolve, reject } = queue.shift();
-    active++;
-    task().then(resolve, reject).finally(() => { active--; next(); });
-  }
-  return task => new Promise((resolve, reject) => { queue.push({ task, resolve, reject }); next(); });
-}
-// Bounded concurrency overlaps selected file reads; every selected member is hashed in full.
-const HASH_CONCURRENCY = 8;
 // Walks the payload; every file or in-root link must resolve to a bounded regular file and pinned members must match.
-async function payloadFiles(root, expected, hashes, includePhone) {
-  const actual = new Set(), run = boundedRunner(HASH_CONCURRENCY), checks = [];
-  let total = 0, entries = 0;
-  async function checkHash(relative, resolved) {
-    if (await hashFile(resolved) !== hashes[relative]) fail(`Release file SHA-256 mismatch: ${relative}`);
+// No caller has other pending work while a payload is validated, so the walk and the member reads
+// are synchronous; every selected member is still hashed in full on every call.
+function payloadFiles(root, expected, hashes, includePhone) {
+  const actual = new Set();
+  let total = 0, entries = 0, hashError = null;
+  function checkHash(relative, resolved) {
+    try {
+      if (hashFileSync(resolved) !== hashes[relative]) fail(`Release file SHA-256 mismatch: ${relative}`);
+    } catch (error) { hashError ??= error; }
   }
-  async function visit(directoryPath) {
-    for (const name of await fs.readdir(directoryPath)) {
+  function visit(directoryPath) {
+    for (const name of readdirSync(directoryPath)) {
       // Optional Phone is checked at activation. Do not traverse an unused tree,
       // including a missing or redirected tree; selected runtime links cannot use it.
       if (!includePhone && directoryPath === root && name === 'phone') continue;
       if (++entries > LIMITS.members * 2) fail('Cached release has too many entries');
       const target = path.join(directoryPath, name), relative = path.relative(root, target).split(path.sep).join('/');
       memberPath(relative);
-      const entry = await fs.lstat(target);
-      if (entry.isDirectory()) { await visit(target); continue; }
+      const entry = lstatSync(target);
+      if (entry.isDirectory()) { visit(target); continue; }
       if (!entry.isFile() && !entry.isSymbolicLink()) fail('Release contains a special file');
-      const resolved = await fs.realpath(target);
+      // The native form is what fs.promises.realpath (and payloadRoot) resolves with.
+      const resolved = realpathSync.native(target);
       if (!inside(root, resolved)) fail('Release link escapes the cache root');
       if (!includePhone && path.relative(root, resolved).split(path.sep)[0] === 'phone') fail('Runtime link resolves into optional Phone payload');
-      const resolvedInfo = await fs.lstat(resolved);
+      const resolvedInfo = lstatSync(resolved);
       if (!resolvedInfo.isFile() || resolvedInfo.size > LIMITS.member) fail('Release link does not resolve to a bounded regular file');
       total += resolvedInfo.size;
       if (total > LIMITS.expanded) fail('Cached release exceeds expansion limit');
       actual.add(relative);
-      // Each check settles to its error (or null) at once, so none is ever an unhandled rejection.
-      if (expected.has(relative)) checks.push(run(() => checkHash(relative, resolved)).then(() => null, error => error));
+      if (expected.has(relative)) checkHash(relative, resolved);
     }
   }
-  // Every started read settles before returning or failing; a walk failure takes precedence,
-  // otherwise the first mismatch in walk order is reported.
-  const walkError = await visit(root).then(() => null, error => error);
-  const hashErrors = await Promise.all(checks);
-  if (walkError) throw walkError;
-  const mismatch = hashErrors.find(Boolean);
-  if (mismatch) throw mismatch;
+  // A walk failure takes precedence (it throws past any recorded member failure);
+  // otherwise the first failed member in walk order is reported.
+  visit(root);
+  if (hashError) throw hashError;
   return actual;
 }
 // The checksum documents themselves are the only unhashed members; Linux also ships the text form.
@@ -214,7 +202,7 @@ async function validatePayload(directory, spec, { includePhone = true } = {}) {
   // Only a declared Phone component may be deferred to its activation check.
   const deferPhone = declaresPhone(expected) && !includePhone;
   if (deferPhone) for (const name of expected) if (name.startsWith('phone/')) expected.delete(name);
-  const actual = await payloadFiles(root, expected, hashes, !deferPhone);
+  const actual = payloadFiles(root, expected, hashes, !deferPhone);
   await checkMemberSet(root, spec, hashes, expected, actual);
   await checkProductIdentity(root, spec, metadata);
   return publicExecutable(root, spec, hashes);

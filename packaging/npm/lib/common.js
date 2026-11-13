@@ -1,6 +1,6 @@
 'use strict';
 const fs = require('node:fs/promises');
-const { createReadStream } = require('node:fs');
+const { createReadStream, statSync, openSync, fstatSync, readSync, closeSync } = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 
@@ -31,6 +31,26 @@ async function hashFile(filename, maximum = LIMITS.member) {
   }
   return hash.digest('hex');
 }
+// hashFile for a caller with nothing else on the event loop: the same refusals and digest, read
+// synchronously into one reused buffer. The descriptor that is measured is the one that is hashed.
+const HASH_BUFFER = 1024 * 1024;
+let hashBuffer = null;
+function hashFileSync(filename, maximum = LIMITS.member) {
+  if (!statSync(filename).isFile()) fail('Release file exceeds its size limit');
+  const descriptor = openSync(filename, 'r');
+  try {
+    const info = fstatSync(descriptor);
+    if (!info.isFile() || info.size > maximum) fail('Release file exceeds its size limit');
+    const hash = createHash('sha256'), buffer = hashBuffer ??= Buffer.allocUnsafe(HASH_BUFFER);
+    let size = 0;
+    for (let count; (count = readSync(descriptor, buffer, 0, buffer.length, null)) > 0;) {
+      size += count;
+      if (size > maximum) fail('Release file exceeds its size limit');
+      hash.update(count === buffer.length ? buffer : buffer.subarray(0, count));
+    }
+    return hash.digest('hex');
+  } finally { closeSync(descriptor); }
+}
 async function readSmall(filename, maximum = LIMITS.metadata) {
   const info = await fs.lstat(filename);
   if (!info.isFile() || info.isSymbolicLink() || info.size > maximum) fail('Unsafe or oversized release metadata');
@@ -48,4 +68,4 @@ async function safeDirectory(directory) {
   const info = await fs.lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) fail('Cache directory contains a link or non-directory');
 }
-module.exports = { LIMITS, fail, memberPath, inside, hashFile, readSmall, exists, safeDirectory };
+module.exports = { LIMITS, fail, memberPath, inside, hashFile, hashFileSync, readSmall, exists, safeDirectory };

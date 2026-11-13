@@ -90,8 +90,8 @@ is needed. Pass that URL to `npx --yes` for one run, or to
 go after the URL. Use a published asset; a candidate version in documentation
 does not establish that a package is available.
 
-The StackBite source repository is private; this public
-`Shinick-Han/stackbite` repository distributes only this thin launcher and
+First-party source is private at `shinick-dev/stackbite`. The separate
+public `Shinick-Han/stackbite` repository distributes only this thin launcher and
 verified compiled runtime releases; installers need no GitHub or npm login.
 Registry-free distribution does not require publishing rights on npm.
 The small JavaScript package downloads the
@@ -176,8 +176,8 @@ npm publish --access public --registry=https://registry.npmjs.org
 ```
 
 Complete any registry-required authentication interactively; do not put credentials
-in this repository, prompts or package files. Each published wrapper and runtime release is governed by the
-[LICENSE](../../LICENSE) and notices included with that version (releases through 0.5.121 were published under MIT; 0.5.122+ use proprietary distribution terms). Native runtime dependency notices remain in each
+in this repository, prompts or package files. StackBite 0.5.122 and later, including this wrapper, use the
+[StackBite License](../../LICENSE); releases through 0.5.121 published under MIT stay MIT. Native runtime dependency notices remain in each
 platform archive. Existing registry tarballs are not changed by this source update.
 
 Archive hashes are checked during preparation; cached launches verify the selected
