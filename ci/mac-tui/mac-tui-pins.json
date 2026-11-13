@@ -3,7 +3,7 @@
   "source": {
     "repository": "shinick-dev/stackbite",
     "visibility": "private",
-    "commit": "01cc87c8fd69379634e7b8f1bf0dfe3497622251",
+    "commit": "a1f9486064a0ce9804c79d57151d8ec871424693",
     "checkout_path": ".ci-private-source"
   },
   "toolchain": "1.98.1",
