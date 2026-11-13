@@ -1,4 +1,6 @@
 #!/bin/bash
+# RUNTIME-DIAGNOSTICS CANDIDATE: exact H2 de40d1ca ci/native122-macos/mac122-job.sh (blob 68268502) + only the
+# capture_qa_diagnostics call in finish(); every step, flag (--test-threads=1) and helper is unchanged.
 # Native macOS 0.5.122 job body (PLATFORM122, tools/derive122.py) derived from the EXECUTED 0.5.121 job
 # (R121-PLATFORM-B1-REPAIR bound-3efd770c-b1, ARM CI f989ee63). Both lanes run in Shinick-Han/stackbite;
 # the workflow's literal SB122_PLATFORM picks mac122-pins-<platform>.json. The PRODUCT is the PRIVATE
@@ -30,9 +32,107 @@ test ! -e "$PRIV" && test ! -e "$PUB" && test ! -e "$W" && test ! -e "$VENV"
 test -d "$SRC" && test ! -L "$SRC"
 mkdir -m 700 "$PRIV" "$PUB" "$OUT" "$W"
 
+# Bounded private QA command-log capture (runtime diagnostics): BEFORE helper final inventories ci-out, copy the
+# QA helpers' own per-command logs (scripts/qa/lifecycle_regression.py Layout.logs = <qa-root>/logs/NNN-<label>
+# [.stderr].private.log, used by ci/native120/native-runtime-qa.py for $Q/rq and by the lifecycle steps for
+# $Q/ls and $Q/lu) and their result JSON into ci-out as qa-<lane>-<name>. Only regular, non-symlink, single-link
+# direct children of an exact $Q/<lane>/logs under the job's own /private/tmp/q122-XXXXXXXX root; <= 4 MiB each,
+# <= 32 MiB total; files 0600; nothing else under $Q (profile/state/auth) is read. Output stays in ci-out (CMS
+# sealed allowlist), never stdout or the public upload. A capture error never changes a failing exit; it fails
+# closed (exit 97) only a job that was otherwise passing.
+capture_qa_diagnostics() {
+  "$BASE_PY" -I -B - "$Q" "$OUT" "$1" '/private/tmp/q122-' > /dev/null 2>> "$OUT/qa-diagnostics.private.log" <<'PYCAP'
+import hashlib, json, os, re, stat, sys
+q, out, job_exit, prefix = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+LANES = ('rq', 'ls', 'lu')
+JSONS = ('qualification.json', 'failure.json', 'result.json')
+LOG = re.compile(r'[0-9]{3}-[A-Za-z0-9._-]{1,80}\.private\.log').fullmatch
+EACH, TOTAL = 4 << 20, 32 << 20
+SECRET_ENV = ('GITHUB_TOKEN', 'GH_TOKEN', 'ACTIONS_RUNTIME_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_CACHE_URL')
+secrets = [os.environ[k].encode() for k in SECRET_ENV if len(os.environ.get(k, '')) >= 8]
+record = dict(schema='stackbite.platform122.qa-diagnostics-capture.v1', job_exit=job_exit, qa_root_present=bool(q),
+              bounds=dict(each_bytes=EACH, total_bytes=TOTAL), copied=[], missing=[], errors=[], ignored=0)
+total = 0
+def err(lane, name, reason):
+    record['errors'].append(dict(lane=lane, name=name, reason=reason))
+def read_bounded(path):
+    st0 = os.lstat(path)   # type-check before any open: a FIFO/device/socket is never opened
+    if stat.S_ISLNK(st0.st_mode): return None, 'symlink'
+    if not stat.S_ISREG(st0.st_mode): return None, 'not_regular'
+    if st0.st_nlink != 1: return None, 'hard_linked'
+    if st0.st_size > EACH: return None, 'oversize'
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+    try:
+        st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) != (st0.st_dev, st0.st_ino): return None, 'changed'
+        if not stat.S_ISREG(st.st_mode): return None, 'not_regular'
+        if st.st_nlink != 1: return None, 'hard_linked'
+        if st.st_size > EACH: return None, 'oversize'
+        data = b''
+        while len(data) <= EACH:
+            chunk = os.read(fd, EACH + 1 - len(data))
+            if not chunk: break
+            data += chunk
+        return (None, 'oversize') if len(data) > EACH else (data, None)
+    finally:
+        os.close(fd)
+def copy(lane, path, name):
+    global total
+    target = os.path.join(out, f'qa-{lane}-{name}')
+    try:
+        if os.path.lexists(target): return err(lane, name, 'target_exists')
+        data, why = read_bounded(path)
+        if why: return err(lane, name, why)
+        if total + len(data) > TOTAL: return err(lane, name, 'total_bound')
+        if any(s in data for s in secrets): return err(lane, name, 'credential_value')
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        with os.fdopen(fd, 'wb') as f: f.write(data)
+        os.chmod(target, 0o600)
+        total += len(data)
+        record['copied'].append(dict(lane=lane, source=f'{lane}/{os.path.relpath(path, os.path.join(q, lane))}'.replace(os.sep, '/'),
+                                     name=f'qa-{lane}-{name}', bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
+    except OSError as e:
+        err(lane, name, f'os_error:{e.errno}')
+def real_dir(path):
+    return os.path.isdir(path) and not os.path.islink(path)
+if not q:
+    record['missing'].append('qa_root')
+elif not (re.fullmatch(re.escape(prefix) + r'[A-Za-z0-9]{8}', q) and real_dir(q) and os.path.realpath(q) == q
+          and os.path.realpath(os.path.dirname(q)) == os.path.dirname(q)):
+    err('-', '-', 'unsafe_qa_root')
+else:
+    for lane in LANES:
+        root = os.path.join(q, lane)
+        if not os.path.lexists(root):
+            record['missing'].append(lane); continue
+        if not real_dir(root):
+            err(lane, '-', 'lane_not_real_dir'); continue
+        for name in JSONS:
+            p = os.path.join(root, name)
+            if os.path.lexists(p): copy(lane, p, name)
+        logs = os.path.join(root, 'logs')
+        if not os.path.lexists(logs):
+            record['missing'].append(lane + '/logs'); continue
+        if not real_dir(logs):
+            err(lane, 'logs', 'logs_not_real_dir'); continue
+        for name in sorted(os.listdir(logs)):   # only NNN-label.private.log is selected; any other name is ignored (counted, never read)
+            if LOG(name): copy(lane, os.path.join(logs, name), name)
+            else: record['ignored'] += 1
+if job_exit == 0 and record['missing']:
+    for m in record['missing']: err(m, '-', 'missing_on_pass')
+record['total_bytes'] = total
+fd = os.open(os.path.join(out, 'qa-diagnostics-capture.json'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+with os.fdopen(fd, 'w', encoding='utf-8') as f: json.dump(record, f, indent=2, sort_keys=True); f.write('\n')
+sys.exit(1 if record['errors'] else 0)
+PYCAP
+}
+
 finish() {
   code=$?
   set +e
+  capture_qa_diagnostics "$code"
+  capture=$?
+  if [ "$code" = 0 ] && [ "$capture" != 0 ]; then code=97; fi
   helper final --src "$SRC" --work "$W" --out "$OUT" --qa "$Q" --job-exit "$code" > "$OUT/final.log" 2>&1
   final=$?
   # Public stdout: only the enum summary printed by `public`; final.log stays private.
@@ -160,7 +260,34 @@ preflight() {
     --out "$OUT/preflight-$1.json" --allow-ignored
 }
 step preflight-0 preflight 0
-step preflight-1 preflight 1
+macos_process_preflight() {
+  preflight 1
+  # Source-reviewed R3 native host regression, discovered and executed on this unprivileged Mac.
+  local T=(env RUSTC="$C/rustc" CARGO_TARGET_DIR="$W/preflight-target" "$C/cargo" test
+    --manifest-path rust/Cargo.toml --locked -p stackbite-launcher --lib native_lifecycle::host::tests)
+  "${T[@]}" -- --list --format terse > "$W/macos-process-host.list"
+  grep -F 'darwin_table_keeps_this_process_and_its_root_owned_ancestors: test' "$W/macos-process-host.list" > /dev/null
+  "${T[@]}" -- --test-threads=1 | tee "$W/macos-process-host.out"
+  helper count --label macos-process-host --list "$W/macos-process-host.list" --run "$W/macos-process-host.out" --out "$OUT/macos-process-host.json"
+  "$BASE_PY" -I -B - "$OUT/macos-process-api.json" <<'PYHOST'
+import ctypes as c, errno, json, os, pathlib, struct, sys
+assert os.geteuid() != 0, 'unprivileged native proof required'
+p=c.CDLL(None, use_errno=True)
+p.proc_pidinfo.argtypes=[c.c_int,c.c_int,c.c_uint64,c.c_void_p,c.c_int]; p.proc_pidinfo.restype=c.c_int
+b=c.create_string_buffer(4096); c.set_errno(0)
+n=p.proc_pidinfo(1,3,0,b,len(b)); pe=c.get_errno()
+k=c.CDLL(None,use_errno=True)
+k.sysctl.argtypes=[c.POINTER(c.c_int),c.c_uint,c.c_void_p,c.POINTER(c.c_size_t),c.c_void_p,c.c_size_t]; k.sysctl.restype=c.c_int
+mib=(c.c_int*4)(1,14,1,1); raw=c.create_string_buffer(648); size=c.c_size_t(648)
+c.set_errno(0); rc=k.sysctl(mib,4,raw,c.byref(size),None,0); se=c.get_errno()
+assert rc==0 and size.value==648, (rc,se,size.value)
+pid=struct.unpack_from('=i',raw.raw,40)[0]; parent=struct.unpack_from('=i',raw.raw,560)[0]
+assert (pid,parent)==(1,0), (pid,parent)
+r=dict(schema='stackbite.native122.macos-process-api.v1',unprivileged=True,pid1_tbsdinfo_bytes=n,pid1_tbsdinfo_errno=errno.errorcode.get(pe,str(pe)),pid1_sysctl_bytes=size.value,pid1_parent=parent)
+pathlib.Path(sys.argv[1]).write_text(json.dumps(r,sort_keys=True)+'\n')
+PYHOST
+}
+step preflight-1 macos_process_preflight
 
 # Full native stackbite-terminal-tui --lib (closes T01). Same toolchain, RUSTC and preflight-target as the
 # preflights, so the shared debug test graph is not compiled twice; the release lanes build separately.
@@ -173,7 +300,7 @@ tui_lib() {
     --manifest-path rust/Cargo.toml --locked -p "$pkg" --lib)
   "${T[@]}" -- --list --format terse < /dev/null > "$W/tui-lib.list"
   "${T[@]}" -- --list --ignored --format terse < /dev/null > "$W/tui-lib.ignored"
-  "${T[@]}" < /dev/null | tee "$W/tui-lib.out"
+  "${T[@]}" -- --test-threads=1 < /dev/null | tee "$W/tui-lib.out"
   helper tui-lib --list "$W/tui-lib.list" --ignored "$W/tui-lib.ignored" --run "$W/tui-lib.out" \
     --out "$OUT/tui-lib.json"
 }
