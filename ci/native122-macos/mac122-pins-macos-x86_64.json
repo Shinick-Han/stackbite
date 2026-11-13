@@ -11,8 +11,8 @@
     "repository": "shinick-dev/stackbite",
     "visibility": "private",
     "checkout_path": ".ci-private-source",
-    "commit": "7e6a98bdbe6113e8a97c43dbf24fc0e92989f95a",
-    "tree": "51f691d3bc177ee4909f8e62a850000d6afa1874"
+    "commit": "05739611e2fb2557dcaf844f7b98e7ee564b1900",
+    "tree": "c43f65dfaa5ce807936e4705e5c83031cba2b7dd"
   },
   "source_package_version": "0.5.121",
   "toolchain": "1.98.1",
