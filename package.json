@@ -1,6 +1,6 @@
 {
   "name": "stackbite",
-  "version": "0.5.120",
+  "version": "0.5.121",
   "description": "Verified native Stackbite CLI bootstrapper",
   "license": "MIT",
   "engines": {

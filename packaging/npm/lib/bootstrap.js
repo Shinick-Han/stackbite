@@ -342,7 +342,7 @@ async function captureBaseline(environment, platform, cachedHome, packageRoot) {
   return legacy.some(pin => pin.identity !== null) ? { root, incarnation: null, legacy } : null;
 }
 
-async function assertBaseline(environment, platform) {
+async function assertBaseline(environment, platform, locator = null) {
   const raw = environment.STACKBITE_INSTALL_BASELINE;
   if (raw === undefined) return;
   if (Buffer.byteLength(raw) > 16384) fail('Invalid installation baseline');
@@ -351,7 +351,7 @@ async function assertBaseline(environment, platform) {
     await assertPreparationBaseline(expected, root, platform, environment);
     return;
   }
-  const current = await locatorInstallationId(root);
+  const current = await locatorInstallationId(root, locator);
   if (expected.root !== root || expected.incarnation !== current) fail('Installation changed while staging');
   if (current === null) await assertLegacyBaseline(expected, platform, environment);
 }
@@ -368,14 +368,23 @@ async function assertPreparationBaseline(expected, root, platform, environment) 
   if (JSON.stringify(actual) !== JSON.stringify(libuvIdentity(platform, actual, pin.identity))) fail('Installation changed while staging');
 }
 // The first present locator's incarnation; null for a legacy or absent locator.
-async function locatorInstallationId(root) {
+async function locatorInstallationId(root, locator = null) {
+  const value = await (locator ? locator() : firstLocator(root));
+  return value === undefined ? null : value.installation_id ?? null;
+}
+// The first present locator's parsed value, unchecked; undefined when none is present.
+async function firstLocator(root) {
   for (const name of ['default-install.json', 'install.json']) {
     const file = path.join(root, name);
     if (!await exists(file)) continue;
-    const value = JSON.parse((await readSmall(file, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
-    return value.installation_id ?? null;
+    return JSON.parse((await readSmall(file, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
   }
-  return null;
+  return undefined;
+}
+// One firstLocator read of `root`, shared by the checks of one decision.
+function onceLocator(root) {
+  let read = null;
+  return () => (read ??= firstLocator(root));
 }
 async function assertLegacyBaseline(expected, platform, environment) {
   if (!Array.isArray(expected.legacy) || !expected.legacy.length || expected.legacy.length > 32) fail('Invalid legacy installation baseline');
@@ -572,22 +581,18 @@ async function formerSelection(saved, environment, spec) {
   return state && path.resolve(state) !== saved?.state ? null : formerCache(saved?.home, spec);
 }
 async function publishCache(payload, target, spec, options) {
-  await assertBaseline(options.environment, spec.platform);
+  // The staging check and the reuse decision below judge the same locator bytes.
+  const locator = onceLocator(installationRoot(options.environment, spec.platform));
+  await assertBaseline(options.environment, spec.platform, locator);
   let migrate = false;
-  if (options.existing) {
-    const root = installationRoot(options.environment, spec.platform);
-    for (const name of ['default-install.json', 'install.json']) {
-      const locator = path.join(root, name);
-      if (!await exists(locator)) continue;
-      const saved = JSON.parse((await readSmall(locator, 16384)).toString('utf8').replace(/^\uFEFF/, ''));
-      const descriptor = options.environment.STACKBITE_NPM_REGISTRATION;
-      migrate = previousCacheHome(saved.home, options.cache, spec.platform)
-        || !!await formerSelection(saved, options.environment, spec);
-      if (!migrate && typeof saved.home === 'string' && path.isAbsolute(saved.home)
-          && typeof saved.state === 'string' && path.isAbsolute(saved.state) && /^[a-f0-9]{32}$/.test(saved.installation_id)
-          && (!descriptor || JSON.stringify(saved.npm_registration) === JSON.stringify(JSON.parse(descriptor)))) return;
-      break;
-    }
+  const saved = options.existing ? await locator() : undefined;
+  if (saved !== undefined) {
+    const descriptor = options.environment.STACKBITE_NPM_REGISTRATION;
+    migrate = previousCacheHome(saved.home, options.cache, spec.platform)
+      || !!await formerSelection(saved, options.environment, spec);
+    if (!migrate && typeof saved.home === 'string' && path.isAbsolute(saved.home)
+        && typeof saved.state === 'string' && path.isAbsolute(saved.state) && /^[a-f0-9]{32}$/.test(saved.installation_id)
+        && (!descriptor || JSON.stringify(saved.npm_registration) === JSON.stringify(JSON.parse(descriptor)))) return;
   }
   const engine = path.join(payload, 'stackbite' + (spec.platform === 'win32' ? '.exe' : ''));
   // A selection still in the previous cache layout moves to the durable image.
@@ -640,11 +645,10 @@ async function anotherPin(root) {
 // of this release is refused, not replaced. Publication keeps the locator's
 // home, except that a cache image (this host's or a former host's) is never run
 // in place.
-async function selectedImage(environment, spec, cache) {
-  const saved = await installationLocator(environment, spec.platform);
+// `saved` is the caller's installationLocator and `former` its formerCache(saved.home).
+async function selectedImage(environment, spec, cache, saved, former) {
   // A previous-cache selection keeps its existing migration path.
   if (!saved || previousCacheHome(saved.home, cache, spec.platform)) return null;
-  const former = await formerCache(saved.home, spec);
   for (const home of [environment.STACKBITE_HOME, saved.home]) {
     if (typeof home !== 'string' || !path.isAbsolute(home) || home === former) continue;
     const root = await sameRelease(home, spec);
@@ -678,19 +682,21 @@ async function ensureBinary(spec, { cache = cacheDirectory(), runtime = null, do
   // Full identity remains SHA-256 addressed while avoiding Windows MAX_PATH.
   const cacheKey = createHash('sha256').update(JSON.stringify([spec.version, spec.commit, spec.key, spec.sha256])).digest('hex');
   const legacy = path.join(cache, `v1-${cacheKey}`);
-  const target = await selectedDirectory(runtime, environment, spec.platform) ? await pinnedTarget(runtime, spec)
-    : path.join(runtime, runtimeName(spec));
+  // A runtime root resolved here stays resolved for this call; an absent one is looked up again below.
+  const runtimeSelected = await selectedDirectory(runtime, environment, spec.platform);
+  const target = runtimeSelected ? await pinnedTarget(runtime, spec) : path.join(runtime, runtimeName(spec));
   const preparation = !checkOnly ? await reservePreparation(environment, spec.platform, target, registrationSource) : null;
   try {
     if (registrationSource) await registrationSource.validate();
     if (!checkOnly) await assertBaseline(environment, spec.platform);
     // Check-only callers (removal, setup --check) never publish; they may still
     // use an image of the previous cache layout, this host's or a former host's.
-    const published = await selectedDirectory(runtime, environment, spec.platform) && await exists(target);
-    const former = !published && reuseSelected
-      ? await formerCache((await installationLocator(environment, spec.platform))?.home, spec) : null;
+    const published = (runtimeSelected || await selectedDirectory(runtime, environment, spec.platform)) && await exists(target);
+    // One locator read and one former-cache classification serve both uses below.
+    const saved = !published && reuseSelected ? await installationLocator(environment, spec.platform) : null;
+    const former = !published && reuseSelected ? await formerCache(saved?.home, spec) : null;
     const home = published ? target
-      : reuseSelected && await selectedImage(environment, spec, cache)
+      : reuseSelected && await selectedImage(environment, spec, cache, saved, former)
         || (checkOnly ? (await existingCacheDirectory(cache) && await exists(legacy) ? legacy : former) : null);
     if (home) {
       if (checkOnly || reportCached) progress('validate');
