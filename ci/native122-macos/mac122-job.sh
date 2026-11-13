@@ -173,7 +173,7 @@ tui_lib() {
     --manifest-path rust/Cargo.toml --locked -p "$pkg" --lib)
   "${T[@]}" -- --list --format terse < /dev/null > "$W/tui-lib.list"
   "${T[@]}" -- --list --ignored --format terse < /dev/null > "$W/tui-lib.ignored"
-  "${T[@]}" < /dev/null | tee "$W/tui-lib.out"
+  "${T[@]}" -- --test-threads=1 < /dev/null | tee "$W/tui-lib.out"
   helper tui-lib --list "$W/tui-lib.list" --ignored "$W/tui-lib.ignored" --run "$W/tui-lib.out" \
     --out "$OUT/tui-lib.json"
 }
