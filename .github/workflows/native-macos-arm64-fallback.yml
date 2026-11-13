@@ -1,24 +1,28 @@
-name: StackBite native macOS arm64 fallback
-run-name: native-macos-arm64-fallback-${{ github.run_id }}
-# Manual only: one job on the standard public macos-15 (arm64) runner of the public distributor.
-# The PRODUCT is the frozen public source commit pinned in ci/native120-arm64/arm120-pins.json,
-# fetched credential-free into $RUNNER_TEMP/s120; the builder derives its identity from that
-# checkout's actual Git HEAD. This workflow's own commit (GITHUB_SHA) is the CI identity and is
-# recorded separately; the two are never equated. No secrets, signing keys or write permissions
-# are used; the archive stays unsigned. All logs, receipts and the archive go to
-# $RUNNER_TEMP/ci-out, uploaded even when a step fails.
+name: StackBite native macOS arm64 0.5.121
+run-name: native-macos-arm64-121-${{ github.run_id }}
+# Manual only (workflow_dispatch, no inputs): ONE job on the standard public macos-15 (arm64) runner of
+# Shinick-Han/stackbite. Derived by derive121.py from the qualified 0.5.120 arm64 fallback workflow (distributor
+# 9fb18829, run 43243456196); the same ci/native121-macos harness bytes run in both lanes and
+# mac121-pins.json picks this one. The PRODUCT is the frozen public source commit R pinned in
+# ci/native121-macos/mac121-pins.json (bound by Root from runtime-source.json), fetched credential-free
+# into $RUNNER_TEMP/s121; the builder derives its identity from that checkout's actual Git HEAD.
+# This workflow's own commit (GITHUB_SHA) is the CI identity H and is recorded separately; H is
+# never claimed as R. No secrets, signing keys or write permissions are used; the archive stays
+# unsigned. No automatic retry, no push/PR/tag trigger. All logs, receipts and the archive go to
+# $RUNNER_TEMP/ci-out, uploaded even when a step fails. timeout-minutes 120 is a proposal pending
+# Root/user approval (measured 0.5.120 arm64 job: 43m31s; the Intel figure is an estimate).
 on:
   workflow_dispatch: {}
 permissions:
   contents: read
 concurrency:
-  group: stackbite-native-macos-arm64-fallback
+  group: stackbite-native-macos-arm64-121
   cancel-in-progress: false
 jobs:
   native-arm64:
     if: github.repository == 'Shinick-Han/stackbite'
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONUTF8: '1'
@@ -33,11 +37,11 @@ jobs:
           python-version: '3.12'
           architecture: arm64
       - name: Native arm64 build, audits, runtime QA, lifecycle, trust, connect and ordinary PTY
-        run: bash ci/native120-arm64/arm120-job.sh
+        run: bash ci/native121-macos/mac121-job.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: native-macos-arm64-fallback-${{ github.run_id }}
+          name: native-macos-arm64-121-${{ github.run_id }}
           path: ${{ runner.temp }}/ci-out
           retention-days: 3
           if-no-files-found: error

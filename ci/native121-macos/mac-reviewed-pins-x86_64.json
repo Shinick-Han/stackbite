@@ -1,0 +1,16 @@
+{
+  "schema": "stackbite-macos-reviewed-pins-v1",
+  "target": "x86_64-apple-darwin",
+  "core": {
+    "library": "libstackbite-terminal-core.dylib",
+    "sha256": "89530a2017d62dc104007913cb134e14ba4c8215c9f874582bd6a544433cb030"
+  },
+  "zig": {
+    "version": "0.16.0",
+    "sha256": "5597fba0eb9d8f1f5331e3e5822e7e96e4a12eeb6f4939781bd8e2c13b15e8b5"
+  },
+  "review": {
+    "reviewer": "Codex root coordinator",
+    "reference": "release115 Intel native run 42558878357; independently verified official Zig and Mach-O/core/source/legal bytes"
+  }
+}
