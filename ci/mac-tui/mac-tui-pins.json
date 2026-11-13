@@ -1,0 +1,19 @@
+{
+  "schema": "stability122.mac-private-tui.pins.v1",
+  "source": {
+    "repository": "shinick-dev/stackbite",
+    "visibility": "private",
+    "commit": "01cc87c8fd69379634e7b8f1bf0dfe3497622251",
+    "checkout_path": ".ci-private-source"
+  },
+  "toolchain": "1.98.1",
+  "package": "stackbite-terminal-tui",
+  "expected_machine": "arm64",
+  "support_floor_macos": "13",
+  "required_filters": [
+    "native_ctrl_c_while_copy_outstanding_does_not_enqueue",
+    "geometry_and_resize_cancel_native_copy",
+    "queue_full_ctrl_c_submits_the_saved_callback_text_once",
+    "ctrl_c_copies_an_active_selection_and_otherwise_stays_the_interrupt"
+  ]
+}
