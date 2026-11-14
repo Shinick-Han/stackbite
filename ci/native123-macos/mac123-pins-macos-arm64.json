@@ -1,0 +1,84 @@
+{
+  "schema": "stackbite.native123.macos-pins.v1",
+  "version": "0.5.123",
+  "baseline_version": "0.5.122",
+  "platform": "macos-arm64",
+  "target": "aarch64-apple-darwin",
+  "runner": "macos-26",
+  "ci_repository": "Shinick-Han/stackbite",
+  "workflow": ".github/workflows/native-macos-arm64-fallback.yml",
+  "source": {
+    "repository": "shinick-dev/stackbite",
+    "visibility": "private",
+    "checkout_path": ".ci-private-source",
+    "commit": "e4438e45b5bedaa1729ef6672c484d7db38bf59e",
+    "tree": "1e99858efebfa4b85ac4d68f93c8698c3e8c2e9d"
+  },
+  "source_package_version": "0.5.122",
+  "toolchain": "1.98.1",
+  "msrv": "1.85.1",
+  "deployment_target": "13.0",
+  "bins": [
+    "stackbite-agent",
+    "stackbite-launcher",
+    "stackbite-managementd",
+    "stackbite-remote",
+    "stackbite-remote-bridge",
+    "stackbite-terminald",
+    "stackbite-tui"
+  ],
+  "old122": {
+    "name": "stackbite-0.5.122-macos-arm64-05739611e2fb.tar.gz",
+    "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.5.122/stackbite-0.5.122-macos-arm64-05739611e2fb.tar.gz",
+    "sha256": "4c45eded3884033fc4e97cfdc217a9ea08a1a5e5bdd56d95256365de676aa913",
+    "size": 26950195,
+    "version": "0.5.122",
+    "commit": "05739611e2fb2557dcaf844f7b98e7ee564b1900",
+    "source_tree": "c43f65dfaa5ce807936e4705e5c83031cba2b7dd"
+  },
+  "core": {
+    "directory": "private_pty/_native/terminal-core",
+    "library_sha256": "dccf09c939a58b767d0b923ac4dfd98229062e3abcdf1d19d2c0ea1f7f240024",
+    "manifest_sha256": "2b2dabd05ac0d2fde13dfd491fc8f6ba13ab7066445157e7297957bf5b732fe6"
+  },
+  "update_public_key": "8910d4d36ae948cbefa74589712333f991aa6292023bc8a3b5f36ab997c00553",
+  "macos_reviewed_pins_file": {
+    "path": "mac-reviewed-pins-aarch64.json",
+    "sha256": "dc9d4c3b43561b77d47e01d6199bc03c32a33b32352447eb072f04833e16a88c"
+  },
+  "build_requirements": "requirements-build.txt",
+  "source_files": {
+    "ci/native120/intel120.py": "8d5abed5339a016c78f1a8c04e3d5642de14681f66b06485f5a7689fa7032c24",
+    "ci/native120/native-runtime-qa.py": "ea37e0df9d598a1542f7dba78841b00db0a788d42d98c3fa6f3c95f6be45785b",
+    "scripts/qa/lifecycle_regression.py": "c19c2a47c5fa336224873e88707259907f611b333042e8ef391959bbf601b169",
+    "requirements-build.txt": "8b5c18678b29b5e8e0fb586a35ac1dce3ccd9da321e8f12ace0e118350b4e568",
+    "ci/native120/requirements-intel-build.txt": "5fba6133b446d9ffa5aaa295b573e0e902b3b187f80f17650f2c2ac71a3b44a0",
+    "rust/PROJECT-NOTICE.txt": "c25b1eb4405c197ba335a171c572f926fa991d2db73a9be3f010c253180d4188",
+    "LICENSE": "c52cb41e4c81d85f504a0caa8f11d0d39dc6ffdfd9d3c2092f3c82fa57b4a251"
+  },
+  "drivers": {
+    "package-native-trust-adapted.py": "884ae2db622fb82d0d92da97578c1a2eac8a254fe48cf175e3a60f5b4f5544c4",
+    "connect-native-qa121.py": "cf5c4d16c830c44e15b81ddbad0ee6cab3e28f5eeeddb0e2e29069e1b4d61d1f",
+    "ordinary-posix121.py": "45368f9f592c3ac7ebfb5ec5d8a96dc829559fb98cb3f02d3a755991c1461097"
+  },
+  "preflights": [
+    {
+      "package": "stackbite-private-files",
+      "filter": "macos_tests::"
+    },
+    {
+      "package": "stackbite-launcher-kit",
+      "filter": "update_artifact::"
+    }
+  ],
+  "tui_lib": {
+    "package": "stackbite-terminal-tui",
+    "expected_ignored": 3,
+    "required_filters": [
+      "native_ctrl_c_while_copy_outstanding_does_not_enqueue",
+      "geometry_and_resize_cancel_native_copy",
+      "queue_full_ctrl_c_submits_the_saved_callback_text_once",
+      "ctrl_c_copies_an_active_selection_and_otherwise_stays_the_interrupt"
+    ]
+  }
+}
