@@ -1,0 +1,16 @@
+{
+  "schema": "stackbite-macos-reviewed-pins-v1",
+  "target": "aarch64-apple-darwin",
+  "core": {
+    "library": "libstackbite-terminal-core.dylib",
+    "sha256": "dccf09c939a58b767d0b923ac4dfd98229062e3abcdf1d19d2c0ea1f7f240024"
+  },
+  "zig": {
+    "version": "0.16.0",
+    "sha256": "e6cd688d25664983833aae272f501d4bceeae304875b8f1741209d15fd13a4ec"
+  },
+  "review": {
+    "reviewer": "Codex root",
+    "reference": "wave48 reviewed C source; official Zig binary pin; native Mac build and10 ABI/row tests; Root Mach-O/digest/source/legal verification"
+  }
+}

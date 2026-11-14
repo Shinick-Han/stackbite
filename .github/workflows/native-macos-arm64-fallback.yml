@@ -1,23 +1,22 @@
-name: StackBite native macOS arm64 0.5.122 (private source)
-run-name: native-macos-arm64-122-${{ github.run_id }}
-# PLATFORM122 (tools/derive122.py): the EXECUTED 0.5.121 native job (build, two equal reproducible lanes,
-# MSRV, audits, runtime QA, lifecycle fresh+update, provider trust, connect, ordinary PTY) on the PRIVATE
-# product source. Manual only: ONE job on the standard public macos-26 runner of Shinick-Han/stackbite,
-# no inputs, no retry, no push/PR/tag trigger, no needs, no cache. PRODUCT = private shinick-dev/stackbite
-# at the commit pinned in ci/native122-macos/mac122-pins-macos-arm64.json, checked out read-only by the
-# pinned actions/checkout with the deploy key passed ONLY as its ssh-key input (persist-credentials false).
-# This workflow's own commit is the CI identity H, recorded separately and never claimed as R. Public logs
-# carry only step/exit enums; the only uploaded artifact is $RUNNER_TEMP/public-summary (summary, stripped
-# unsigned archive, CMS-encrypted diagnostics). Path = the workflow already registered on the default branch
-# (distributor ddd); the overlay lands on a CI branch only, never on main. timeout-minutes 120 is a Root
-# PROPOSAL for explicit user approval (current grant 45 min; measured 0.5.121 single job: arm64 36.3 min,
-# x86_64 71.9 min, before the added full TUI lib stage). Do not dispatch before Root records that approval.
+name: StackBite native macOS arm64 0.5.123 (private source)
+run-name: native-macos-arm64-123-${{ github.run_id }}
+# PLATFORM123 (tools/derive123.py): the EXECUTED 0.5.122 native job of H 1dd7e036 (build, two equal
+# reproducible lanes, MSRV 1.85.1, strip probe, preflights, full TUI lib, package/Mach-O/minos-13 audit,
+# runtime QA, lifecycle fresh + 0.5.122 update, provider trust, connect, ordinary PTY) for 0.5.123 on the
+# PRIVATE product source. Manual only: ONE arm64 job on the standard public macos-26 runner of
+# Shinick-Han/stackbite; no inputs, no retry, no push/PR/tag trigger, no needs, no cache. The other
+# architecture is a separate workflow with its own concurrency group, so neither can cancel the other.
+# PRODUCT = private shinick-dev/stackbite at the commit pinned in ci/native123-macos/mac123-pins-macos-arm64.json,
+# checked out read-only by the pinned actions/checkout with the deploy key secret passed ONLY by name as its
+# ssh-key input (persist-credentials false). This workflow's commit is the CI identity H123, never R. Public
+# logs carry only step/exit enums; the only artifact is $RUNNER_TEMP/public-summary. timeout-minutes 120 is
+# the user-approved cap (0.5.122 measured: arm64 33.9 min macos-26, x86_64 106.8 min macos-15-intel).
 on:
   workflow_dispatch: {}
 permissions:
   contents: read
 concurrency:
-  group: stackbite-native-macos-arm64-122
+  group: stackbite-native-macos-arm64-123
   cancel-in-progress: false
 jobs:
   native-arm64:
@@ -27,7 +26,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONUTF8: '1'
-      SB122_PLATFORM: macos-arm64
+      SB123_PLATFORM: macos-arm64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -37,7 +36,7 @@ jobs:
       - name: Read pinned private source commit
         id: pin
         run: |
-          c="$(python3 -I -B ci/native122-macos/mac122.py pin source.commit)"
+          c="$(python3 -I -B ci/native123-macos/mac123.py pin source.commit)"
           [[ "$c" =~ ^[0-9a-f]{40}$ ]]
           echo "commit=$c" >> "$GITHUB_OUTPUT"
       - name: Check out pinned private source
@@ -55,14 +54,14 @@ jobs:
           python-version: '3.12'
           architecture: arm64
       - name: Native arm64 build, audits, runtime QA, lifecycle, trust, connect and ordinary PTY
-        run: bash ci/native122-macos/mac122-job.sh
+        run: bash ci/native123-macos/mac123-job.sh
       - name: Seal private diagnostics for local decryption
         if: always()
-        run: bash ci/native122-macos/seal122.sh
+        run: bash ci/native123-macos/seal123.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: native-macos-arm64-122-${{ github.run_id }}
+          name: native-macos-arm64-123-${{ github.run_id }}
           path: ${{ runner.temp }}/public-summary
           retention-days: 3
           if-no-files-found: error
