@@ -94,11 +94,11 @@ HERE = pathlib.Path(__file__).resolve().parent
 PRIVATE_CHECKOUT = '.ci-private-source'
 PLATFORM_ENV = 'SB060_PLATFORM'
 PUBLIC_SCHEMA = 'stackbite.native060.macos-r5full-public-summary.v1'
-ARCHIVE_NAME = re.compile(r'stackbite-0\.8\.0-macos-(arm64|x86_64)-[0-9a-f]{12}\.tar\.gz').fullmatch
+ARCHIVE_NAME = re.compile(r'stackbite-0\.8\.1-macos-(arm64|x86_64)-[0-9a-f]{12}\.tar\.gz').fullmatch
 SCHEMA = 'stackbite.native060.macos-r5full-pins.v1'
 RESULT_SCHEMA = 'stackbite.native060.macos-r5full-result.v1'
 HARNESS = 'ci/native060-macos'
-VERSION, BASELINE = '0.8.0', '0.6.0'
+VERSION, BASELINE = '0.8.1', '0.8.0'
 
 # RREL04 (0.6.0): the L0 Linux runtime-capsule catalog every final controller pins. Root binds its exact bytes
 # (CATALOG in this harness directory, data only) and their sha256/size into both lane pins (bind_mac.py).
@@ -224,7 +224,7 @@ def load_pins(path):
         fail('mac060 pins name no supported platform', pins.get('platform'))
     if not (HEX40(str(src.get('commit'))) and HEX40(str(src.get('tree')))):
         fail('mac060 pins carry no bound frozen source R: Root must bind runtime-source.json first (no guessed SHA)')
-    prefix = 'https://github.com/Shinick-Han/stackbite/releases/download/v0.6.0/'
+    prefix = 'https://github.com/Shinick-Han/stackbite/releases/download/v0.8.0/'
     ok = (pins.get('schema') == SCHEMA and pins.get('version') == VERSION and pins.get('baseline_version') == BASELINE
           and pins.get('target') == lane['target'] and pins.get('runner') == lane['runner']
           and pins.get('ci_repository') == lane['ci_repository'] and pins.get('workflow') == lane['workflow']
@@ -238,7 +238,7 @@ def load_pins(path):
           and all(HEX64(str(v)) for v in (old.get('sha256'), core.get('library_sha256'), core.get('manifest_sha256'),
                                           pins.get('update_public_key'), rev.get('sha256')))
           and str(old.get('url', '')).startswith(prefix) and old['url'] == prefix + str(old.get('name'))
-          and old.get('name') == f"stackbite-0.6.0-{pins['platform']}-{str(old.get('commit'))[:12]}.tar.gz"
+          and old.get('name') == f"stackbite-0.8.0-{pins['platform']}-{str(old.get('commit'))[:12]}.tar.gz"
           and isinstance(old.get('size'), int) and 0 < old['size'] <= 64 * 1024 * 1024
           and old.get('version') == BASELINE and HEX40(str(old.get('commit'))) and HEX40(str(old.get('source_tree')))
           and old['commit'] != src['commit']

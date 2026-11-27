@@ -1,7 +1,7 @@
 {
   "schema": "stackbite.native060.macos-r5full-pins.v1",
-  "version": "0.8.0",
-  "baseline_version": "0.6.0",
+  "version": "0.8.1",
+  "baseline_version": "0.8.0",
   "platform": "macos-x86_64",
   "target": "x86_64-apple-darwin",
   "runner": "macos-15-intel",
@@ -11,10 +11,10 @@
     "repository": "shinick-dev/stackbite",
     "visibility": "private",
     "checkout_path": ".ci-private-source",
-    "commit": "732fe64e9e45b974c56472f79377cffdd85b52e7",
-    "tree": "c5819a0b5492d6a04dfa79dd14199195d0e2a866"
+    "commit": "9279e6472871287405cbef80c3d79241ef5c92e9",
+    "tree": "fb50d710d3b1e96df43817beb82875ec954be5f5"
   },
-  "source_package_version": "0.7.6",
+  "source_package_version": "0.8.0",
   "toolchain": "1.98.1",
   "msrv": "1.85.1",
   "deployment_target": "13.0",
@@ -28,13 +28,13 @@
     "stackbite-tui"
   ],
   "old123": {
-    "name": "stackbite-0.6.0-macos-x86_64-060019651abe.tar.gz",
-    "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.6.0/stackbite-0.6.0-macos-x86_64-060019651abe.tar.gz",
-    "sha256": "bb3ea60fc214a659c93370250693d252aade1e39ef285808847b14b8cde04570",
-    "size": 30326781,
-    "version": "0.6.0",
-    "commit": "060019651abe60485a0cc39e72d99e8756e4aea2",
-    "source_tree": "3f6ab2522ee7e4d6b51ec53d9984ff4089584b01"
+    "name": "stackbite-0.8.0-macos-x86_64-732fe64e9e45.tar.gz",
+    "url": "https://github.com/Shinick-Han/stackbite/releases/download/v0.8.0/stackbite-0.8.0-macos-x86_64-732fe64e9e45.tar.gz",
+    "sha256": "b494151e64f142b16ffbdbe4023b20b489cbfbb757f385dd7909513cf30ceacb",
+    "size": 32263452,
+    "version": "0.8.0",
+    "commit": "732fe64e9e45b974c56472f79377cffdd85b52e7",
+    "source_tree": "c5819a0b5492d6a04dfa79dd14199195d0e2a866"
   },
   "core": {
     "directory": "private_pty/_native/terminal-core",
@@ -83,7 +83,7 @@
   },
   "runtime_capsule_catalog": {
     "path": "runtime-capsules.json",
-    "sha256": "902e7084366514fabc7679b1d582bc045fe5159bd2d319f6b368702ff15c22c7",
+    "sha256": "08cd403de404e17c4ba19ccf07677eacc7b8ea473dbe92c114b3e47dd6a4cfc5",
     "size": 507
   },
   "placed_wire": {
