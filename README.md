@@ -4,7 +4,7 @@ A terminal workspace for shells and AI coding agents, organized into Rooms and
 Seats. The app is a Rust-native launcher, Room service, terminal owner and TUI;
 no Python is needed to run it.
 
-Current release: **0.8.0** · [Release notes](https://github.com/Shinick-Han/stackbite/releases/tag/v0.8.0) · [All releases](https://github.com/Shinick-Han/stackbite/releases) · [Issues](https://github.com/Shinick-Han/stackbite/issues)
+Current release: **0.8.1** · [Release notes](https://github.com/Shinick-Han/stackbite/releases/tag/v0.8.1) · [All releases](https://github.com/Shinick-Han/stackbite/releases) · [Issues](https://github.com/Shinick-Han/stackbite/issues)
 
 ## Install
 
@@ -27,7 +27,7 @@ Without Node.js, download a native bundle from the
 extract the **entire** archive and run `stackbite.exe` (Windows) or `./stackbite`
 (Linux, macOS).
 
-| Platform | 0.8.0 bundle |
+| Platform | 0.8.1 bundle |
 | --- | --- |
 | Windows | x64 |
 | Linux | x86_64, GLIBC 2.28+ |

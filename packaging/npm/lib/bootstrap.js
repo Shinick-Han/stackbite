@@ -873,18 +873,6 @@ async function stageRelease(spec, staging, { downloadImpl, extractImpl, progress
 // Stage ownership (this invocation's mkdtemp identity) and cleanup settlement.
 const { createStage, removeStage, settleCleanup, debtReporter } = require('./stage-cleanup');
 const { profileNeedsRepair, reportCommandResolution } = require('./command-resolution');
-// The fixed engine may hand removal to a helper started from its own image
-// (parent_resume.runtime). While the same journal still names that image, the
-// stage is the helper's runtime and stays; finalization removes the journal.
-async function stageStillNeeded(pending, staging) {
-  let record;
-  try { record = JSON.parse((await readSmall(pending.journal, 8 * 1024 * 1024)).toString('utf8').replace(/^\uFEFF/, '')); }
-  catch (error) { if (error.code === 'ENOENT') return false; return true; }
-  const runtime = record?.parent_resume?.runtime?.path;
-  if (record?.request_id !== pending.request || typeof runtime !== 'string' || !path.isAbsolute(runtime)) return false;
-  const roots = [staging, await fs.realpath(staging)];
-  return roots.some(root => inside(root, path.resolve(runtime)));
-}
 // Continue an accepted removal with a private, verified copy of this package's
 // pinned runtime. Nothing is published: no cache, locator, preparation or
 // installation identity is created, and only the original argv runs.
@@ -906,7 +894,7 @@ async function continueAcceptedRemoval(spec, argv, environment, options) {
     const result = await launchNative(executable, argv, { ...environment,
       ...(npm ? { STACKBITE_NPM_REGISTRATION: JSON.stringify(npm) } : {}),
       STACKBITE_HOME: path.resolve(payload) }, options);
-    retained = await stageStillNeeded(pending, staging);
+    retained = await require('./damaged-runtime').stageNeeded(pending.journal, staging, pending.request);
     return await registrationTools.settleWithoutNpm(argv, result, unavailable, options.platform || process.platform);
   } catch (error) { staged.failed = true; staged.error = error; throw error; }
   finally {

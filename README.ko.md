@@ -25,7 +25,7 @@ Codex·Claude 같은 provider CLI는 별도로 설치하고 로그인합니다.
 압축 파일을 받아 **전체를 해제**한 뒤 `stackbite.exe`(Windows) 또는 `./stackbite`
 (Linux·macOS)로 실행할 수도 있습니다. 이 경로는 Node.js와 Python이 모두 필요 없습니다.
 
-현재 버전: **0.8.0**
+현재 버전: **0.8.1**
 
 | Platform | Runtime |
 | --- | --- |
@@ -33,9 +33,9 @@ Codex·Claude 같은 provider CLI는 별도로 설치하고 로그인합니다.
 | Linux | x86_64, GLIBC 2.28 이상 |
 | macOS | Apple Silicon·Intel, macOS 13 이상 |
 
-네 배포본은 runtime source `732fe64e9e45`로 빌드합니다. Linux ARM·Alpine/musl
+네 배포본은 runtime source `9279e6472871`로 빌드합니다. Linux ARM·Alpine/musl
 배포본은 제공하지 않습니다. 배포 파일, 실제 검사 범위와 아직 검증하지 않은 항목은
-[0.8.0 release notes](https://github.com/Shinick-Han/stackbite/releases/tag/v0.8.0)에 있습니다.
+[0.8.1 release notes](https://github.com/Shinick-Han/stackbite/releases/tag/v0.8.1)에 있습니다.
 
 ## 작업 공간
 

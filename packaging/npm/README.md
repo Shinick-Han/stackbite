@@ -1,6 +1,6 @@
 # StackBite through npm and npx
 
-StackBite 0.8.0 supplies Windows x64, Linux x64 with glibc 2.28 or newer,
+StackBite 0.8.1 supplies Windows x64, Linux x64 with glibc 2.28 or newer,
 and native Apple Silicon and Intel runtimes for macOS 13 or newer.
 Node.js 20 or newer is required.
 The current [Node.js LTS](https://nodejs.org/en/download) is recommended. Linux

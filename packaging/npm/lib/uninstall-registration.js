@@ -376,11 +376,7 @@ async function restoreFile(item) {
 }
 
 async function commandParent(file) {
-  for (let parent = path.dirname(file); ; parent = path.dirname(parent)) {
-    try { const info = await fs.lstat(parent); if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Linked npm command preserved'); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (parent === path.dirname(parent)) return;
-  }
+  if (!await ancestorsAreDirectories(file)) throw new Error('Linked npm command preserved');
 }
 
 function acceptedRemoval(argv, result) {

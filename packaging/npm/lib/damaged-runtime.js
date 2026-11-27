@@ -47,13 +47,14 @@ function explain(error, spec, damaged) {
 // The stage holds the runtime of a helper the engine handed this removal to
 // while the installation's journal names an image inside it. An unreadable
 // journal keeps the stage.
-async function stageNeeded(journal, staging) {
+async function stageNeeded(journal, staging, request) {
   let record;
   try {
     const info = await fs.lstat(journal);
     if (!info.isFile() || info.size > 8 * 1024 * 1024) return true;
     record = JSON.parse((await fs.readFile(journal, 'utf8')).replace(/^\uFEFF/, ''));
   } catch (error) { return error.code !== 'ENOENT'; }
+  if (request !== undefined && record?.request_id !== request) return false;
   const runtime = record?.parent_resume?.runtime?.path;
   if (typeof runtime !== 'string' || !path.isAbsolute(runtime)) return false;
   return [staging, await fs.realpath(staging)].some(root => inside(root, path.resolve(runtime)));
